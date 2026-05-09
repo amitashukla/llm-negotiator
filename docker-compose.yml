@@ -1,0 +1,25 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    container_name: llm-negotiator-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - backend_data:/app/data
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: llm-negotiator-frontend
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_BASE_URL=http://127.0.0.1:8000/api
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  backend_data:
