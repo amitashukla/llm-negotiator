@@ -27,6 +27,16 @@ class NashEstimate(BaseModel):
     yH: float
 
 
+class CurvePoint(BaseModel):
+    xH: float
+    yH: float
+
+
+class IndifferenceCurves(BaseModel):
+    candidate: list[CurvePoint]
+    employer: list[CurvePoint]
+
+
 class HistoryEntry(BaseModel):
     round: int
     candidate: Offer
@@ -45,6 +55,8 @@ class GameState(BaseModel):
     alphaHat: float = 0.5
     agreed: Optional[Offer] = None
     nashEst: Optional[NashEstimate] = None
+    trueNash: Optional[NashEstimate] = None
+    indifferenceCurves: Optional[IndifferenceCurves] = None
     history: list[HistoryEntry] = Field(default_factory=list)
 
 

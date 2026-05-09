@@ -18,6 +18,16 @@ export interface NashEstimate {
   yH: number;
 }
 
+export interface CurvePoint {
+  xH: number;
+  yH: number;
+}
+
+export interface IndifferenceCurves {
+  candidate: CurvePoint[];
+  employer: CurvePoint[];
+}
+
 export interface HistoryEntry {
   round: number;
   candidate: Offer;
@@ -36,6 +46,8 @@ export interface GameState {
   alphaHat: number;
   agreed: Offer | null;
   nashEst: NashEstimate | null;
+  trueNash: NashEstimate | null;
+  indifferenceCurves: IndifferenceCurves | null;
   history: HistoryEntry[];
 }
 

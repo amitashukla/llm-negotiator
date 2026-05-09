@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from typing import Optional
 
-from .models import GameState, HistoryEntry, NashEstimate, Offer, Posterior
+from .models import CurvePoint, GameState, HistoryEntry, IndifferenceCurves, NashEstimate, Offer, Posterior
 
 W = 10.0
 H = 10.0
@@ -35,6 +35,37 @@ def candidate_ic_y(xC: float, alpha: float, utility: float) -> Optional[float]:
     if base == 0:
         return None
     return (utility / base) ** (1 / (1 - alpha))
+
+
+def employer_ic_y(xC: float, utility: float) -> Optional[float]:
+    if xC <= 0 or xC >= W:
+        return None
+    employer_x = W - xC
+    base = employer_x**BETA
+    if base == 0:
+        return None
+    employer_y = (utility / base) ** (1 / (1 - BETA))
+    return H - employer_y
+
+
+def build_indifference_curves(xH: float, yH: float, alpha: float) -> IndifferenceCurves:
+    candidate_u = candidate_util(xH, yH, alpha)
+    employer_u = employer_util(xH, yH)
+    candidate_points: list[CurvePoint] = []
+    employer_points: list[CurvePoint] = []
+    samples = 240
+
+    for i in range(1, samples):
+        xC = (i / samples) * (W - 0.02) + 0.01
+        y_candidate = candidate_ic_y(xC, alpha, candidate_u)
+        if y_candidate is not None and 0 <= y_candidate <= H:
+            candidate_points.append(CurvePoint(xH=xC, yH=y_candidate))
+
+        y_employer = employer_ic_y(xC, employer_u)
+        if y_employer is not None and 0 <= y_employer <= H:
+            employer_points.append(CurvePoint(xH=xC, yH=y_employer))
+
+    return IndifferenceCurves(candidate=candidate_points, employer=employer_points)
 
 
 def best_employer_on_ic(alpha_hat: float, candidate_u_target: float) -> Optional[tuple[float, float]]:
@@ -122,6 +153,8 @@ def start_game(alpha: float) -> GameState:
         alphaHat=0.5,
         agreed=None,
         nashEst=None,
+        trueNash=None,
+        indifferenceCurves=None,
         history=[],
     )
 
@@ -171,6 +204,12 @@ def apply_confirm(state: GameState) -> GameState:
             state.phase = "done"
             state.offers = new_offers
             state.pending = None
+            state.trueNash = nash_point(state.alpha) if state.alpha is not None else None
+            state.indifferenceCurves = (
+                build_indifference_curves(last_employer_offer.xH, last_employer_offer.yH, state.alpha)
+                if state.alpha is not None
+                else None
+            )
             state.msg = (
                 f"Deal! Final: Candidate ({last_employer_offer.xH:.2f}, {last_employer_offer.yH:.2f}), "
                 f"Employer ({W - last_employer_offer.xH:.2f}, {H - last_employer_offer.yH:.2f})."
@@ -181,6 +220,8 @@ def apply_confirm(state: GameState) -> GameState:
         state.offers = new_offers
         state.pending = None
         state.phase = "done"
+        state.trueNash = nash_point(state.alpha) if state.alpha is not None else None
+        state.indifferenceCurves = None
         state.msg = "5 rounds complete with no agreement. Both sides receive 0."
         return state
 

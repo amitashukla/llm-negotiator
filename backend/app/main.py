@@ -61,7 +61,19 @@ def apply_action(session_id: str, payload: ActionRequest) -> SessionResponse:
     elif payload.type == "cancel":
         state = apply_cancel(state)
     elif payload.type == "reset":
-        state = state.model_copy(update={"phase": "setup", "msg": "", "offers": [], "history": [], "pending": None, "alpha": None, "nashEst": None})
+        state = state.model_copy(
+            update={
+                "phase": "setup",
+                "msg": "",
+                "offers": [],
+                "history": [],
+                "pending": None,
+                "alpha": None,
+                "nashEst": None,
+                "trueNash": None,
+                "indifferenceCurves": None,
+            }
+        )
     else:
         raise HTTPException(status_code=400, detail="Unknown action type")
 

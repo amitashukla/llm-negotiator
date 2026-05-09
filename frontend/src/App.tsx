@@ -92,6 +92,26 @@ export default function App() {
     if (!state || state.alpha == null || !currentOffer) return null;
     return offerUtilities(currentOffer.xH, currentOffer.yH, state.alpha);
   }, [state, currentOffer]);
+  const candidateCurvePath = useMemo(() => {
+    const points = state?.indifferenceCurves?.candidate ?? [];
+    if (points.length < 2) return null;
+    return points
+      .map((p, i) => {
+        const c = toCanvas(p.xH, p.yH);
+        return `${i === 0 ? "M" : "L"} ${c.cx.toFixed(2)} ${c.cy.toFixed(2)}`;
+      })
+      .join(" ");
+  }, [state?.indifferenceCurves]);
+  const employerCurvePath = useMemo(() => {
+    const points = state?.indifferenceCurves?.employer ?? [];
+    if (points.length < 2) return null;
+    return points
+      .map((p, i) => {
+        const c = toCanvas(p.xH, p.yH);
+        return `${i === 0 ? "M" : "L"} ${c.cx.toFixed(2)} ${c.cy.toFixed(2)}`;
+      })
+      .join(" ");
+  }, [state?.indifferenceCurves]);
 
   const endowC = toCanvas(5, 5);
   const pendingC = state?.pending ? toCanvas(state.pending.xH, state.pending.yH) : null;
@@ -246,6 +266,24 @@ export default function App() {
                 );
               })()}
 
+              {state.phase === "done" && candidateCurvePath && (
+                <path d={candidateCurvePath} fill="none" stroke={COLORS.candidate} strokeWidth={2} strokeDasharray="7,4" opacity={0.85} />
+              )}
+
+              {state.phase === "done" && employerCurvePath && (
+                <path d={employerCurvePath} fill="none" stroke={COLORS.employer} strokeWidth={2} strokeDasharray="7,4" opacity={0.85} />
+              )}
+
+              {state.trueNash && state.phase === "done" && (() => {
+                const c = toCanvas(state.trueNash.xH, state.trueNash.yH);
+                return (
+                  <>
+                    <line x1={c.cx - 6} y1={c.cy - 6} x2={c.cx + 6} y2={c.cy + 6} stroke="#111827" strokeWidth={2} />
+                    <line x1={c.cx + 6} y1={c.cy - 6} x2={c.cx - 6} y2={c.cy + 6} stroke="#111827" strokeWidth={2} />
+                  </>
+                );
+              })()}
+
               {pendingC && (
                 <>
                   <line x1={endowC.cx} y1={endowC.cy} x2={pendingC.cx} y2={pendingC.cy} stroke={COLORS.offer} strokeWidth={1} strokeDasharray="3,2" />
@@ -356,7 +394,24 @@ export default function App() {
             )}
 
             {state.phase === "done" && (
-              <button onClick={() => void syncAction({ type: "reset" })}>Play again</button>
+              <>
+                {state.trueNash && (
+                  <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", padding: "1rem 1.25rem", fontSize: 12, color: "#4b5563" }}>
+                    <p style={{ margin: "0 0 6px", fontWeight: 600 }}>End-of-bargaining outcomes</p>
+                    <p style={{ margin: "0 0 4px" }}>
+                      True Nash point: Candidate ({state.trueNash.xH.toFixed(2)}, {state.trueNash.yH.toFixed(2)})
+                    </p>
+                    {state.agreed ? (
+                      <p style={{ margin: 0 }}>
+                        Indifference curves shown through the agreed point for both parties (dashed blue and dashed red).
+                      </p>
+                    ) : (
+                      <p style={{ margin: 0 }}>No agreement reached, so indifference curves are omitted.</p>
+                    )}
+                  </div>
+                )}
+                <button onClick={() => void syncAction({ type: "reset" })}>Play again</button>
+              </>
             )}
 
             {lastCandidateOffer && lastEmployerOffer && (
