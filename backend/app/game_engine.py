@@ -8,13 +8,13 @@ from .models import CurvePoint, GameState, HistoryEntry, IndifferenceCurves, Nas
 
 W = 10.0
 H = 10.0
-BETA = 0.6
+BETA = 0.8
 ROUNDS = 5
 DELTA = 0.7
 EPSILON = 0.08
 ACCEPT_RADIUS = 0.3
 
-ENDOW_P_MEAN = 0.25
+ENDOW_P_MEAN = 0.5
 ENDOW_P_STDEV = 0.05
 
 
@@ -147,6 +147,22 @@ def employer_counteroffer(round_num: int, offers: list[Offer], prior: Posterior)
     return employer_offer, post, alpha_hat, nb
 
 
+def _finalize_done_state(state: GameState) -> None:
+    """Recompute employer belief from all candidate offers; Nash guess; true ICs through endowment."""
+    post = update_posterior(Posterior(a=2.0, b=2.0), state.offers)
+    state.posterior = post
+    state.alphaHat = posterior_mean(post)
+    if state.alpha is not None:
+        state.nashEst = nash_point(state.alphaHat)
+        if state.endowXH is not None and state.endowYH is not None:
+            state.endowmentIndifferenceCurves = build_indifference_curves(state.endowXH, state.endowYH, state.alpha)
+        else:
+            state.endowmentIndifferenceCurves = None
+    else:
+        state.nashEst = None
+        state.endowmentIndifferenceCurves = None
+
+
 def make_default_state() -> GameState:
     return GameState()
 
@@ -170,6 +186,7 @@ def start_game(alpha: float) -> GameState:
         nashEst=None,
         trueNash=None,
         indifferenceCurves=None,
+        endowmentIndifferenceCurves=None,
         history=[],
     )
 
@@ -229,6 +246,7 @@ def apply_confirm(state: GameState) -> GameState:
                 f"Deal! Final: Candidate ({last_employer_offer.xH:.2f}, {last_employer_offer.yH:.2f}), "
                 f"Employer ({W - last_employer_offer.xH:.2f}, {H - last_employer_offer.yH:.2f})."
             )
+            _finalize_done_state(state)
             return state
 
     if state.round >= ROUNDS:
@@ -238,6 +256,7 @@ def apply_confirm(state: GameState) -> GameState:
         state.trueNash = nash_point(state.alpha) if state.alpha is not None else None
         state.indifferenceCurves = None
         state.msg = "5 rounds complete with no agreement. Both sides receive 0."
+        _finalize_done_state(state)
         return state
 
     employer_offer, new_post, a_hat, nb = employer_counteroffer(state.round, new_offers, Posterior(a=2.0, b=2.0))

@@ -1,22 +1,62 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Repo-root .env (so `uvicorn app.main:app` from /backend still gets Atlas credentials after a correct rename).
+load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from .game_engine import apply_cancel, apply_confirm, apply_propose, start_game
 from .models import ActionRequest, SessionResponse, StartGameRequest
+from .mongo_games import MongoGameStore
 from .store import SQLiteSessionStore
 
-app = FastAPI(title="Edgeworth Negotiator API", version="1.0.0")
-store = SQLiteSessionStore(db_path="data/negotiator.db")
+# Bump when debugging deploys; appears in GET / and Docker build verification.
+API_BUILD_ID = "negotiator-backend-2026-05-09"
 
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    import logging
+
+    log = logging.getLogger("uvicorn.error")
+    paths = sorted({p for r in app.routes if (p := getattr(r, "path", None))})
+    log.warning("%s registered routes: %s", API_BUILD_ID, paths)
+    yield
+
+
+app = FastAPI(
+    title="Edgeworth Negotiator API",
+    version="1.0.0",
+    lifespan=_lifespan,
+)
+mongo_games = MongoGameStore()
+store = SQLiteSessionStore(db_path="data/negotiator.db", mongo_games=mongo_games)
+
+# Wildcard: UI may be opened as localhost, 127.0.0.1, or LAN IP (Vite --host 0.0.0.0 in Docker).
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.get("/")
+def root() -> dict[str, str]:
+    """If this 404s on port 8000, another process is bound there—not this API."""
+    return {
+        "service": "edgeworth-negotiator-api",
+        "build": API_BUILD_ID,
+        "health": "/api/health",
+        "docs": "/docs",
+    }
 
 
 @app.post("/api/session", response_model=SessionResponse)
@@ -74,6 +114,7 @@ def apply_action(session_id: str, payload: ActionRequest) -> SessionResponse:
                 "nashEst": None,
                 "trueNash": None,
                 "indifferenceCurves": None,
+                "endowmentIndifferenceCurves": None,
             }
         )
     else:
@@ -86,4 +127,29 @@ def apply_action(session_id: str, payload: ActionRequest) -> SessionResponse:
 
 @app.get("/api/history")
 def get_history() -> list[dict[str, str]]:
-    return store.list_game_history()
+    return mongo_games.list_recent()
+
+
+@app.get("/api/health")
+def api_health() -> dict[str, str | list[str]]:
+    """Cheap heartbeat; confirms this build includes health routes (404 here means stale/old container)."""
+    return {
+        "status": "ok",
+        "mongodb_endpoints": ["/api/health/mongodb", "/health/mongodb"],
+    }
+
+
+@app.get("/api/health/mongodb")
+@app.get("/health/mongodb")
+def mongodb_health() -> dict[str, str | bool | int]:
+    """Verify Atlas/local connectivity and list count (browse DB name must match MONGODB_DB)."""
+    try:
+        mongo_games.ping()
+        return {
+            "ok": True,
+            "database": mongo_games.database_name,
+            "collection": "games",
+            "document_count": mongo_games.games_count(),
+        }
+    except Exception as exc:  # noqa: BLE001 — surface connection errors to operators
+        return {"ok": False, "error": str(exc)}

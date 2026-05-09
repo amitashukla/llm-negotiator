@@ -1,16 +1,23 @@
 from __future__ import annotations
 
+import logging
 import sqlite3
 import uuid
 from pathlib import Path
 from threading import Lock
+from typing import TYPE_CHECKING, Optional
 
 from .game_engine import make_default_state
+from .game_record import build_completed_game_document
 from .models import GameState
+
+if TYPE_CHECKING:
+    from .mongo_games import MongoGameStore
 
 
 class SQLiteSessionStore:
-    def __init__(self, db_path: str) -> None:
+    def __init__(self, db_path: str, mongo_games: Optional["MongoGameStore"] = None) -> None:
+        self._mongo_games = mongo_games
         self._lock = Lock()
         self._db_path = db_path
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -28,17 +35,6 @@ class SQLiteSessionStore:
                     archived INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-                )
-                """
-            )
-            self._conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS game_history (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    session_id TEXT NOT NULL,
-                    outcome TEXT NOT NULL,
-                    final_state_json TEXT NOT NULL,
-                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
                 """
             )
@@ -67,14 +63,26 @@ class SQLiteSessionStore:
     def set(self, session_id: str, state: GameState) -> None:
         with self._lock:
             with self._conn:
-                self._conn.execute(
-                    """
-                    UPDATE sessions
-                    SET state_json = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE session_id = ?
-                    """,
-                    (state.model_dump_json(), session_id),
-                )
+                # Reset archived flag when a game is restarted (phase != "done")
+                # so the next completion gets a fresh MongoDB insert attempt.
+                if state.phase != "done":
+                    self._conn.execute(
+                        """
+                        UPDATE sessions
+                        SET state_json = ?, archived = 0, updated_at = CURRENT_TIMESTAMP
+                        WHERE session_id = ?
+                        """,
+                        (state.model_dump_json(), session_id),
+                    )
+                else:
+                    self._conn.execute(
+                        """
+                        UPDATE sessions
+                        SET state_json = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE session_id = ?
+                        """,
+                        (state.model_dump_json(), session_id),
+                    )
 
     def archive_completed_game(self, session_id: str, state: GameState) -> None:
         if state.phase != "done":
@@ -87,35 +95,28 @@ class SQLiteSessionStore:
             if row is None or row["archived"] == 1:
                 return
 
-            outcome = "agreed" if state.agreed is not None else "no_deal"
-            with self._conn:
-                self._conn.execute(
-                    """
-                    INSERT INTO game_history (session_id, outcome, final_state_json)
-                    VALUES (?, ?, ?)
-                    """,
-                    (session_id, outcome, state.model_dump_json()),
+        # Persist to Atlas/local Mongo first. DB failures must not block gameplay—log and continue.
+        if self._mongo_games is not None:
+            try:
+                doc = build_completed_game_document(session_id, state)
+                self._mongo_games.insert_completed_game(doc)
+            except ValueError:
+                raise
+            except Exception:
+                logging.exception(
+                    "MongoDB archive failed for session %s (check Atlas URI, user password, IP allowlist)",
+                    session_id,
                 )
+
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT archived FROM sessions WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            if row is None or row["archived"] == 1:
+                return
+            with self._conn:
                 self._conn.execute(
                     "UPDATE sessions SET archived = 1, updated_at = CURRENT_TIMESTAMP WHERE session_id = ?",
                     (session_id,),
                 )
-
-    def list_game_history(self) -> list[dict[str, str]]:
-        with self._lock:
-            rows = self._conn.execute(
-                """
-                SELECT id, session_id, outcome, created_at
-                FROM game_history
-                ORDER BY id DESC
-                """
-            ).fetchall()
-            return [
-                {
-                    "id": str(row["id"]),
-                    "session_id": row["session_id"],
-                    "outcome": row["outcome"],
-                    "created_at": row["created_at"],
-                }
-                for row in rows
-            ]

@@ -1,6 +1,9 @@
 .DS_Store
 **/.DS_Store
 
+# Secrets (MongoDB Atlas URI, etc.)
+.env
+
 # Frontend generated artifacts
 frontend/node_modules/
 frontend/dist/

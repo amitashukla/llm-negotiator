@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createSession, getSession, sendAction, startGame } from "./api";
+import { API_BASE, createSession, getSession, sendAction, startGame } from "./api";
 import type { GameState, Offer } from "./types";
 
 const W = 10;
@@ -16,7 +16,10 @@ const COLORS = {
   employer: "#993C1D",
   endow: "#5F5E5A",
   offer: "#BA7517",
-  agree: "#1D9E75"
+  agree: "#1D9E75",
+  /** True ICs through initial endowment (phase done) */
+  icEndowment: "#16a34a",
+  employerNashGuess: "#16a34a"
 };
 
 function toCanvas(xH: number, yH: number) {
@@ -40,6 +43,52 @@ function offerUtilities(xH: number, yH: number, candidateAlpha: number) {
   const employerY = H - yH;
   const employerU = cobbDouglasUtility(employerX, employerY, EMPLOYER_ALPHA);
   return { candidateU, employerU, employerX, employerY };
+}
+
+/** Mirrors backend/app/game_engine.py — used so green ICs render even if API omits precomputed curves. */
+function candidateIcY(xC: number, alpha: number, utility: number): number | null {
+  if (xC <= 0 || xC >= W) return null;
+  const base = xC ** alpha;
+  if (base === 0) return null;
+  return (utility / base) ** (1 / (1 - alpha));
+}
+
+function employerIcY(xC: number, utility: number): number | null {
+  if (xC <= 0 || xC >= W) return null;
+  const employerX = W - xC;
+  const base = employerX ** EMPLOYER_ALPHA;
+  if (base === 0) return null;
+  const employerY = (utility / base) ** (1 / (1 - EMPLOYER_ALPHA));
+  return H - employerY;
+}
+
+function buildAllocIcPath(
+  allocXH: number,
+  allocYH: number,
+  alpha: number,
+  side: "candidate" | "employer"
+): string | null {
+  const candidateU = cobbDouglasUtility(allocXH, allocYH, alpha);
+  const employerU = cobbDouglasUtility(W - allocXH, H - allocYH, EMPLOYER_ALPHA);
+  const samples = 240;
+  const pts: { xH: number; yH: number }[] = [];
+  for (let i = 1; i < samples; i++) {
+    const xC = (i / samples) * (W - 0.02) + 0.01;
+    const y =
+      side === "candidate"
+        ? candidateIcY(xC, alpha, candidateU)
+        : employerIcY(xC, employerU);
+    if (y !== null && y >= 0 && y <= H) {
+      pts.push({ xH: xC, yH: y });
+    }
+  }
+  if (pts.length < 2) return null;
+  return pts
+    .map((p, i) => {
+      const c = toCanvas(p.xH, p.yH);
+      return `${i === 0 ? "M" : "L"} ${c.cx.toFixed(2)} ${c.cy.toFixed(2)}`;
+    })
+    .join(" ");
 }
 
 export default function App() {
@@ -66,9 +115,17 @@ export default function App() {
         localStorage.setItem(SESSION_KEY, created.session_id);
         setSessionId(created.session_id);
         setState(created.state);
-      } catch {
+      } catch (e) {
         localStorage.removeItem(SESSION_KEY);
-        setError("Could not initialize session. Make sure backend is running.");
+        const net =
+          e instanceof TypeError ||
+          (e instanceof Error &&
+            /network|fetch|failed to fetch|load failed/i.test(e.message));
+        setError(
+          net
+            ? `Cannot reach API at ${API_BASE}. Start the backend (e.g. docker compose up backend), ensure port 8000 is free, and rebuild after backend/CORS changes.`
+            : "Could not initialize session. Make sure backend is running."
+        );
       } finally {
         setLoading(false);
       }
@@ -112,6 +169,38 @@ export default function App() {
       })
       .join(" ");
   }, [state?.indifferenceCurves]);
+
+  const endowCandidateIcPath = useMemo(() => {
+    if (!state || state.phase !== "done" || state.alpha == null) return null;
+    const ex = state.endowXH ?? 5;
+    const ey = state.endowYH ?? 5;
+    const api = state.endowmentIndifferenceCurves?.candidate ?? [];
+    if (api.length >= 2) {
+      return api
+        .map((p, i) => {
+          const c = toCanvas(p.xH, p.yH);
+          return `${i === 0 ? "M" : "L"} ${c.cx.toFixed(2)} ${c.cy.toFixed(2)}`;
+        })
+        .join(" ");
+    }
+    return buildAllocIcPath(ex, ey, state.alpha, "candidate");
+  }, [state?.phase, state?.alpha, state?.endowXH, state?.endowYH, state?.endowmentIndifferenceCurves]);
+
+  const endowEmployerIcPath = useMemo(() => {
+    if (!state || state.phase !== "done" || state.alpha == null) return null;
+    const ex = state.endowXH ?? 5;
+    const ey = state.endowYH ?? 5;
+    const api = state.endowmentIndifferenceCurves?.employer ?? [];
+    if (api.length >= 2) {
+      return api
+        .map((p, i) => {
+          const c = toCanvas(p.xH, p.yH);
+          return `${i === 0 ? "M" : "L"} ${c.cx.toFixed(2)} ${c.cy.toFixed(2)}`;
+        })
+        .join(" ");
+    }
+    return buildAllocIcPath(ex, ey, state.alpha, "employer");
+  }, [state?.phase, state?.alpha, state?.endowXH, state?.endowYH, state?.endowmentIndifferenceCurves]);
 
   const endowX = state?.endowXH ?? 5;
   const endowY = state?.endowYH ?? 5;
@@ -271,6 +360,26 @@ export default function App() {
                 );
               })()}
 
+              {state.phase === "done" && endowCandidateIcPath && (
+                <path
+                  d={endowCandidateIcPath}
+                  fill="none"
+                  stroke={COLORS.icEndowment}
+                  strokeWidth={2}
+                  opacity={0.92}
+                />
+              )}
+
+              {state.phase === "done" && endowEmployerIcPath && (
+                <path
+                  d={endowEmployerIcPath}
+                  fill="none"
+                  stroke={COLORS.icEndowment}
+                  strokeWidth={2}
+                  opacity={0.92}
+                />
+              )}
+
               {state.phase === "done" && candidateCurvePath && (
                 <path d={candidateCurvePath} fill="none" stroke={COLORS.candidate} strokeWidth={2} strokeDasharray="7,4" opacity={0.85} />
               )}
@@ -286,6 +395,20 @@ export default function App() {
                     <line x1={c.cx - 6} y1={c.cy - 6} x2={c.cx + 6} y2={c.cy + 6} stroke="#111827" strokeWidth={2} />
                     <line x1={c.cx + 6} y1={c.cy - 6} x2={c.cx - 6} y2={c.cy + 6} stroke="#111827" strokeWidth={2} />
                   </>
+                );
+              })()}
+
+              {state.phase === "done" && state.nashEst && (() => {
+                const c = toCanvas(state.nashEst.xH, state.nashEst.yH);
+                return (
+                  <circle
+                    cx={c.cx}
+                    cy={c.cy}
+                    r={8}
+                    fill={COLORS.employerNashGuess}
+                    stroke="#ffffff"
+                    strokeWidth={2}
+                  />
                 );
               })()}
 
@@ -404,14 +527,22 @@ export default function App() {
                   <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", padding: "1rem 1.25rem", fontSize: 12, color: "#4b5563" }}>
                     <p style={{ margin: "0 0 6px", fontWeight: 600 }}>End-of-bargaining outcomes</p>
                     <p style={{ margin: "0 0 4px" }}>
-                      True Nash point: Candidate ({state.trueNash.xH.toFixed(2)}, {state.trueNash.yH.toFixed(2)})
+                      True Nash (Nash product maximum): Candidate ({state.trueNash.xH.toFixed(2)}, {state.trueNash.yH.toFixed(2)}) — black × on the box.
+                    </p>
+                    {state.nashEst && (
+                      <p style={{ margin: "0 0 4px" }}>
+                        Employer&apos;s Nash guess (from inferred α̂): Candidate ({state.nashEst.xH.toFixed(2)}, {state.nashEst.yH.toFixed(2)}) — green dot.
+                      </p>
+                    )}
+                    <p style={{ margin: "0 0 4px" }}>
+                      Green curves: true indifference curves for both parties through the initial endowment point.
                     </p>
                     {state.agreed ? (
                       <p style={{ margin: 0 }}>
-                        Indifference curves shown through the agreed point for both parties (dashed blue and dashed red).
+                        Blue and red dashed curves: indifference curves through the agreed allocation.
                       </p>
                     ) : (
-                      <p style={{ margin: 0 }}>No agreement reached, so indifference curves are omitted.</p>
+                      <p style={{ margin: 0 }}>No deal: blue/red agreement curves omitted.</p>
                     )}
                   </div>
                 )}

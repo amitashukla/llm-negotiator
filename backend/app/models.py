@@ -59,6 +59,7 @@ class GameState(BaseModel):
     nashEst: Optional[NashEstimate] = None
     trueNash: Optional[NashEstimate] = None
     indifferenceCurves: Optional[IndifferenceCurves] = None
+    endowmentIndifferenceCurves: Optional[IndifferenceCurves] = None
     history: list[HistoryEntry] = Field(default_factory=list)
 
 

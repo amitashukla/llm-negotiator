@@ -1,4 +1,19 @@
 services:
+  mongo:
+    image: mongo:7
+    container_name: llm-negotiator-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
   backend:
     build:
       context: ./backend
@@ -7,6 +22,22 @@ services:
       - "8000:8000"
     volumes:
       - backend_data:/app/data
+    environment:
+      # Override in .env — use your Atlas connection string to store games in MongoDB Atlas (web UI / Data Explorer).
+      MONGODB_URI: ${MONGODB_URI:-mongodb://mongo:27017}
+      MONGODB_DB: ${MONGODB_DB:-negotiator}
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=5).read()",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 25s
     restart: unless-stopped
 
   frontend:
@@ -23,3 +54,4 @@ services:
 
 volumes:
   backend_data:
+  mongo_data:

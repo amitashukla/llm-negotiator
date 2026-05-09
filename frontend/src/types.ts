@@ -51,6 +51,8 @@ export interface GameState {
   nashEst: NashEstimate | null;
   trueNash: NashEstimate | null;
   indifferenceCurves: IndifferenceCurves | null;
+  /** True preferences (alpha): ICs through initial endowment; shown when phase is done */
+  endowmentIndifferenceCurves: IndifferenceCurves | null;
   history: HistoryEntry[];
 }
 
