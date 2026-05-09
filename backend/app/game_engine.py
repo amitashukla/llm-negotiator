@@ -139,8 +139,11 @@ def apply_propose(state: GameState, xH: float, yH: float) -> GameState:
     if xH < 0 or xH > W or yH < 0 or yH > H:
         return state
     state.pending = Offer(xH=xH, yH=yH, type="human", round=state.round)
+    human_u = human_util(xH, yH, state.alpha) if state.alpha is not None else 0.0
+    ai_u = ai_util(xH, yH)
     state.msg = (
-        f"Proposing: you ({xH:.2f}, {yH:.2f}), AI ({W - xH:.2f}, {H - yH:.2f}). Confirm?"
+        f"Proposing: you ({xH:.2f}, {yH:.2f}) U = {human_u:.3f}, "
+        f"AI ({W - xH:.2f}, {H - yH:.2f}) U = {ai_u:.3f}. Confirm?"
     )
     return state
 

@@ -4,6 +4,7 @@ import type { GameState, Offer } from "./types";
 
 const W = 10;
 const H = 10;
+const AI_ALPHA = 0.6;
 const ROUNDS = 5;
 const CANVAS = 420;
 const PAD = 48;
@@ -24,6 +25,21 @@ function toCanvas(xH: number, yH: number) {
 
 function fromCanvas(cx: number, cy: number) {
   return { xH: ((cx - PAD) / INNER) * W, yH: H - ((cy - PAD) / INNER) * H };
+}
+
+function cobbDouglasUtility(x: number, y: number, alpha: number) {
+  if (x <= 0 || y <= 0) {
+    return 0;
+  }
+  return x ** alpha * y ** (1 - alpha);
+}
+
+function offerUtilities(xH: number, yH: number, humanAlpha: number) {
+  const humanU = cobbDouglasUtility(xH, yH, humanAlpha);
+  const aiX = W - xH;
+  const aiY = H - yH;
+  const aiU = cobbDouglasUtility(aiX, aiY, AI_ALPHA);
+  return { humanU, aiU, aiX, aiY };
 }
 
 export default function App() {
@@ -68,6 +84,14 @@ export default function App() {
     () => state?.offers.filter((o) => o.type === "ai").slice(-1)[0],
     [state?.offers]
   );
+  const currentOffer = useMemo(() => {
+    if (!state) return null;
+    return state.pending ?? state.agreed ?? lastAIOffer ?? lastHumanOffer ?? null;
+  }, [state, lastAIOffer, lastHumanOffer]);
+  const currentUtilities = useMemo(() => {
+    if (!state || state.alpha == null || !currentOffer) return null;
+    return offerUtilities(currentOffer.xH, currentOffer.yH, state.alpha);
+  }, [state, currentOffer]);
 
   const endowC = toCanvas(5, 5);
   const pendingC = state?.pending ? toCanvas(state.pending.xH, state.pending.yH) : null;
@@ -290,13 +314,42 @@ export default function App() {
               )}
             </div>
 
+            {currentOffer && currentUtilities && (
+              <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", padding: "1rem 1.25rem" }}>
+                <p style={{ margin: "0 0 8px", fontSize: 13, fontWeight: 600 }}>Current offer utility</p>
+                <p style={{ margin: "0 0 4px", fontSize: 12, color: "#6b7280" }}>
+                  You: ({currentOffer.xH.toFixed(2)}, {currentOffer.yH.toFixed(2)}) U = {currentUtilities.humanU.toFixed(3)}
+                </p>
+                <p style={{ margin: 0, fontSize: 12, color: "#6b7280" }}>
+                  AI: ({currentUtilities.aiX.toFixed(2)}, {currentUtilities.aiY.toFixed(2)}) U = {currentUtilities.aiU.toFixed(3)}
+                </p>
+              </div>
+            )}
+
             {state.history.length > 0 && (
               <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", padding: "1rem 1.25rem" }}>
                 <p style={{ margin: "0 0 8px", fontSize: 13, fontWeight: 600 }}>Round history</p>
                 {state.history.map((h) => (
-                  <div key={h.round} style={{ fontSize: 12, color: "#6b7280", marginBottom: 6 }}>
-                    <strong>R{h.round}</strong> You: ({h.human.xH.toFixed(2)}, {h.human.yH.toFixed(2)}) AI: ({h.ai.xH.toFixed(2)}, {h.ai.yH.toFixed(2)}) alpha_hat{" "}
-                    {h.alphaHat.toFixed(2)}
+                  <div key={h.round} style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
+                    <div>
+                      <strong>R{h.round}</strong> alpha_hat {h.alphaHat.toFixed(2)}
+                    </div>
+                    {state.alpha != null && (() => {
+                      const humanOfferValues = offerUtilities(h.human.xH, h.human.yH, state.alpha);
+                      const aiOfferValues = offerUtilities(h.ai.xH, h.ai.yH, state.alpha);
+                      return (
+                        <>
+                          <div>
+                            You: ({h.human.xH.toFixed(2)}, {h.human.yH.toFixed(2)}) U = {humanOfferValues.humanU.toFixed(3)} | AI: (
+                            {humanOfferValues.aiX.toFixed(2)}, {humanOfferValues.aiY.toFixed(2)}) U = {humanOfferValues.aiU.toFixed(3)}
+                          </div>
+                          <div>
+                            AI offer to you: ({h.ai.xH.toFixed(2)}, {h.ai.yH.toFixed(2)}) U_you = {aiOfferValues.humanU.toFixed(3)} | U_ai ={" "}
+                            {aiOfferValues.aiU.toFixed(3)}
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
                 ))}
               </div>
@@ -308,8 +361,18 @@ export default function App() {
 
             {lastHumanOffer && lastAIOffer && (
               <div style={{ fontSize: 12, color: "#6b7280" }}>
-                Last human offer: ({lastHumanOffer.xH.toFixed(2)}, {lastHumanOffer.yH.toFixed(2)}) | Last AI offer: (
-                {lastAIOffer.xH.toFixed(2)}, {lastAIOffer.yH.toFixed(2)})
+                {state.alpha != null && (() => {
+                  const lastHumanValues = offerUtilities(lastHumanOffer.xH, lastHumanOffer.yH, state.alpha);
+                  const lastAIValues = offerUtilities(lastAIOffer.xH, lastAIOffer.yH, state.alpha);
+                  return (
+                    <>
+                      Last human offer: ({lastHumanOffer.xH.toFixed(2)}, {lastHumanOffer.yH.toFixed(2)}) U_you = {lastHumanValues.humanU.toFixed(3)} | U_ai ={" "}
+                      {lastHumanValues.aiU.toFixed(3)} <br />
+                      Last AI offer: ({lastAIOffer.xH.toFixed(2)}, {lastAIOffer.yH.toFixed(2)}) U_you = {lastAIValues.humanU.toFixed(3)} | U_ai ={" "}
+                      {lastAIValues.aiU.toFixed(3)}
+                    </>
+                  );
+                })()}
               </div>
             )}
           </div>
