@@ -54,3 +54,10 @@ docker compose down
 - Frontend stores session ID in `localStorage`, so state survives browser refresh.
 - State survives backend restarts as long as the SQLite file is preserved.
 - Completed games are archived in `game_history` for future analytics/database work.
+
+## Running the test with LLMs
+
+`cd backend && pip install -r requirements.txt`
+`python run_llm_negotiation.py --model llama-3.3-70b-versatile`
+
+Optional additional parameters: `--fixed-endowment, --seed N, --temperature 0.7, --no-mongo.`

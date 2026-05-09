@@ -18,9 +18,10 @@ ENDOW_P_MEAN = 0.5
 ENDOW_P_STDEV = 0.05
 
 
-def sample_initial_endowment() -> tuple[float, float]:
+def sample_initial_endowment(rng: Optional[random.Random] = None) -> tuple[float, float]:
     """Candidate receives p * (W, H) with p ~ N(mu, sigma), clipped to keep allocations interior."""
-    p = random.gauss(ENDOW_P_MEAN, ENDOW_P_STDEV)
+    r = rng if rng is not None else random
+    p = r.gauss(ENDOW_P_MEAN, ENDOW_P_STDEV)
     eps = 1e-3
     p = min(max(p, eps), 1.0 - eps)
     return p * W, p * H
@@ -41,12 +42,30 @@ def candidate_util(xC: float, yC: float, alpha: float) -> float:
 
 
 def candidate_ic_y(xC: float, alpha: float, utility: float) -> Optional[float]:
+    """Indifference curve y(x) for U = x^alpha * y^(1-alpha). Uses logs when alpha ≈ 1 to avoid overflow."""
     if xC <= 0 or xC >= W:
         return None
-    base = xC**alpha
-    if base == 0:
+    if not (0 < alpha < 1) or utility <= 0:
         return None
-    return (utility / base) ** (1 / (1 - alpha))
+    denom = 1.0 - alpha
+    if denom < 1e-15:
+        return None
+    log_u = math.log(utility)
+    log_x = math.log(xC)
+    log_y = (log_u - alpha * log_x) / denom
+    if not math.isfinite(log_y):
+        return None
+    log_hi = math.log(H)
+    log_lo = math.log(1e-12)
+    if log_y > log_hi or log_y < log_lo:
+        return None
+    try:
+        y = math.exp(log_y)
+    except OverflowError:
+        return None
+    if not math.isfinite(y) or y <= 0:
+        return None
+    return y
 
 
 def employer_ic_y(xC: float, utility: float) -> Optional[float]:
@@ -167,10 +186,18 @@ def make_default_state() -> GameState:
     return GameState()
 
 
-def start_game(alpha: float) -> GameState:
+def last_employer_offer(state: GameState) -> Optional[Offer]:
+    """Most recent employer offer in play, if any."""
+    return _last_offer(state.offers, "employer")
+
+
+def start_game(alpha: float, endowment: Optional[tuple[float, float]] = None) -> GameState:
     if alpha <= 0 or alpha >= 1:
         raise ValueError("Alpha must be between 0 and 1 (exclusive).")
-    ex, ey = sample_initial_endowment()
+    if endowment is None:
+        ex, ey = sample_initial_endowment()
+    else:
+        ex, ey = endowment
     return GameState(
         alpha=alpha,
         endowXH=ex,

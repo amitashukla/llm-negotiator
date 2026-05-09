@@ -67,7 +67,13 @@ def _build_rounds(state: GameState) -> list[dict[str, Any]]:
     return rows
 
 
-def build_completed_game_document(session_id: str, state: GameState) -> dict[str, Any]:
+def build_completed_game_document(
+    session_id: str,
+    state: GameState,
+    *,
+    game_id: Optional[str] = None,
+    llm_run: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
     """Serialize a terminal game state for MongoDB analytics."""
     if state.phase != "done" or state.alpha is None:
         raise ValueError("Game must be finished with a known alpha.")
@@ -110,9 +116,9 @@ def build_completed_game_document(session_id: str, state: GameState) -> dict[str
 
     rounds_completed = state.round if agreed is not None else ROUNDS
 
-    return {
+    doc: dict[str, Any] = {
         "schema_version": 1,
-        "game_id": str(uuid.uuid4()),
+        "game_id": game_id if game_id is not None else str(uuid.uuid4()),
         "session_id": session_id,
         "created_at": now,
         "resolution": resolution,
@@ -136,3 +142,6 @@ def build_completed_game_document(session_id: str, state: GameState) -> dict[str
             "engine_constants": {"W": W, "H": H, "BETA": BETA, "ROUNDS": ROUNDS},
         },
     }
+    if llm_run is not None:
+        doc["llm_run"] = llm_run
+    return doc
