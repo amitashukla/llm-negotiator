@@ -1,5 +1,5 @@
 export type Phase = "setup" | "play" | "done";
-export type OfferType = "human" | "ai";
+export type OfferType = "candidate" | "employer";
 
 export interface Offer {
   xH: number;
@@ -20,8 +20,8 @@ export interface NashEstimate {
 
 export interface HistoryEntry {
   round: number;
-  human: Offer;
-  ai: Offer;
+  candidate: Offer;
+  employer: Offer;
   alphaHat: number;
 }
 

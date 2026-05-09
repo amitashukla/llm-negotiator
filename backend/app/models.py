@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 
 Phase = Literal["setup", "play", "done"]
-OfferType = Literal["human", "ai"]
+OfferType = Literal["candidate", "employer"]
 ActionType = Literal["propose", "confirm", "cancel", "reset"]
 
 
@@ -29,8 +29,8 @@ class NashEstimate(BaseModel):
 
 class HistoryEntry(BaseModel):
     round: int
-    human: Offer
-    ai: Offer
+    candidate: Offer
+    employer: Offer
     alphaHat: float
 
 

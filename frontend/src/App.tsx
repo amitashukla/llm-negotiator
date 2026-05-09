@@ -4,7 +4,7 @@ import type { GameState, Offer } from "./types";
 
 const W = 10;
 const H = 10;
-const AI_ALPHA = 0.6;
+const EMPLOYER_ALPHA = 0.6;
 const ROUNDS = 5;
 const CANVAS = 420;
 const PAD = 48;
@@ -12,8 +12,8 @@ const INNER = CANVAS - 2 * PAD;
 const SESSION_KEY = "edgeworth_session_id";
 
 const COLORS = {
-  human: "#185FA5",
-  ai: "#993C1D",
+  candidate: "#185FA5",
+  employer: "#993C1D",
   endow: "#5F5E5A",
   offer: "#BA7517",
   agree: "#1D9E75"
@@ -34,12 +34,12 @@ function cobbDouglasUtility(x: number, y: number, alpha: number) {
   return x ** alpha * y ** (1 - alpha);
 }
 
-function offerUtilities(xH: number, yH: number, humanAlpha: number) {
-  const humanU = cobbDouglasUtility(xH, yH, humanAlpha);
-  const aiX = W - xH;
-  const aiY = H - yH;
-  const aiU = cobbDouglasUtility(aiX, aiY, AI_ALPHA);
-  return { humanU, aiU, aiX, aiY };
+function offerUtilities(xH: number, yH: number, candidateAlpha: number) {
+  const candidateU = cobbDouglasUtility(xH, yH, candidateAlpha);
+  const employerX = W - xH;
+  const employerY = H - yH;
+  const employerU = cobbDouglasUtility(employerX, employerY, EMPLOYER_ALPHA);
+  return { candidateU, employerU, employerX, employerY };
 }
 
 export default function App() {
@@ -76,18 +76,18 @@ export default function App() {
     void init();
   }, []);
 
-  const lastHumanOffer = useMemo(
-    () => state?.offers.filter((o) => o.type === "human").slice(-1)[0],
+  const lastCandidateOffer = useMemo(
+    () => state?.offers.filter((o) => o.type === "candidate").slice(-1)[0],
     [state?.offers]
   );
-  const lastAIOffer = useMemo(
-    () => state?.offers.filter((o) => o.type === "ai").slice(-1)[0],
+  const lastEmployerOffer = useMemo(
+    () => state?.offers.filter((o) => o.type === "employer").slice(-1)[0],
     [state?.offers]
   );
   const currentOffer = useMemo(() => {
     if (!state) return null;
-    return state.pending ?? state.agreed ?? lastAIOffer ?? lastHumanOffer ?? null;
-  }, [state, lastAIOffer, lastHumanOffer]);
+    return state.pending ?? state.agreed ?? lastEmployerOffer ?? lastCandidateOffer ?? null;
+  }, [state, lastEmployerOffer, lastCandidateOffer]);
   const currentUtilities = useMemo(() => {
     if (!state || state.alpha == null || !currentOffer) return null;
     return offerUtilities(currentOffer.xH, currentOffer.yH, state.alpha);
@@ -161,9 +161,9 @@ export default function App() {
       {state.phase === "setup" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 420 }}>
           <div style={{ background: "#ffffff", borderRadius: 10, border: "1px solid #e5e7eb", padding: "1rem 1.25rem" }}>
-            <p style={{ margin: "0 0 8px", fontSize: 14, fontWeight: 600 }}>Your utility function</p>
+            <p style={{ margin: "0 0 8px", fontSize: 14, fontWeight: 600 }}>Candidate utility function</p>
             <p style={{ margin: "0 0 12px", fontSize: 13, color: "#6b7280" }}>
-              U_H = x^alpha * y^(1-alpha) and AI does not know your alpha
+              U_candidate = x^alpha * y^(1-alpha) and Employer does not know your alpha
             </p>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <label style={{ fontSize: 13, color: "#6b7280" }}>Your alpha =</label>
@@ -220,7 +220,7 @@ export default function App() {
 
               {state.offers.map((o: Offer, i: number) => {
                 const c = toCanvas(o.xH, o.yH);
-                const col = o.type === "human" ? COLORS.human : COLORS.ai;
+                const col = o.type === "candidate" ? COLORS.candidate : COLORS.employer;
                 return (
                   <g key={`${o.type}-${o.round}-${i}`}>
                     {i > 0 && (() => {
@@ -229,7 +229,7 @@ export default function App() {
                     })()}
                     <circle cx={c.cx} cy={c.cy} r={6} fill={col} opacity={0.85} />
                     <text x={c.cx + 8} y={c.cy + 4} fontSize={10} fill={col}>
-                      {o.type === "human" ? "H" : "A"}
+                      {o.type === "candidate" ? "C" : "E"}
                       {o.round}
                     </text>
                   </g>
@@ -299,7 +299,7 @@ export default function App() {
             )}
 
             <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", padding: "1rem 1.25rem" }}>
-              <p style={{ margin: "0 0 8px", fontSize: 13, fontWeight: 600 }}>AI belief about your alpha</p>
+              <p style={{ margin: "0 0 8px", fontSize: 13, fontWeight: 600 }}>Employer belief about your alpha</p>
               <p style={{ margin: "0 0 4px", fontSize: 12, color: "#6b7280" }}>
                 Posterior: Beta({state.posterior.a.toFixed(1)}, {state.posterior.b.toFixed(1)})
               </p>
@@ -318,10 +318,10 @@ export default function App() {
               <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", padding: "1rem 1.25rem" }}>
                 <p style={{ margin: "0 0 8px", fontSize: 13, fontWeight: 600 }}>Current offer utility</p>
                 <p style={{ margin: "0 0 4px", fontSize: 12, color: "#6b7280" }}>
-                  You: ({currentOffer.xH.toFixed(2)}, {currentOffer.yH.toFixed(2)}) U = {currentUtilities.humanU.toFixed(3)}
+                  Candidate: ({currentOffer.xH.toFixed(2)}, {currentOffer.yH.toFixed(2)}) U = {currentUtilities.candidateU.toFixed(3)}
                 </p>
                 <p style={{ margin: 0, fontSize: 12, color: "#6b7280" }}>
-                  AI: ({currentUtilities.aiX.toFixed(2)}, {currentUtilities.aiY.toFixed(2)}) U = {currentUtilities.aiU.toFixed(3)}
+                  Employer: ({currentUtilities.employerX.toFixed(2)}, {currentUtilities.employerY.toFixed(2)}) U = {currentUtilities.employerU.toFixed(3)}
                 </p>
               </div>
             )}
@@ -335,17 +335,17 @@ export default function App() {
                       <strong>R{h.round}</strong> alpha_hat {h.alphaHat.toFixed(2)}
                     </div>
                     {state.alpha != null && (() => {
-                      const humanOfferValues = offerUtilities(h.human.xH, h.human.yH, state.alpha);
-                      const aiOfferValues = offerUtilities(h.ai.xH, h.ai.yH, state.alpha);
+                      const candidateOfferValues = offerUtilities(h.candidate.xH, h.candidate.yH, state.alpha);
+                      const employerOfferValues = offerUtilities(h.employer.xH, h.employer.yH, state.alpha);
                       return (
                         <>
                           <div>
-                            You: ({h.human.xH.toFixed(2)}, {h.human.yH.toFixed(2)}) U = {humanOfferValues.humanU.toFixed(3)} | AI: (
-                            {humanOfferValues.aiX.toFixed(2)}, {humanOfferValues.aiY.toFixed(2)}) U = {humanOfferValues.aiU.toFixed(3)}
+                            Candidate: ({h.candidate.xH.toFixed(2)}, {h.candidate.yH.toFixed(2)}) U = {candidateOfferValues.candidateU.toFixed(3)} |
+                            {" "}Employer: ({candidateOfferValues.employerX.toFixed(2)}, {candidateOfferValues.employerY.toFixed(2)}) U = {candidateOfferValues.employerU.toFixed(3)}
                           </div>
                           <div>
-                            AI offer to you: ({h.ai.xH.toFixed(2)}, {h.ai.yH.toFixed(2)}) U_you = {aiOfferValues.humanU.toFixed(3)} | U_ai ={" "}
-                            {aiOfferValues.aiU.toFixed(3)}
+                            Employer offer to Candidate: ({h.employer.xH.toFixed(2)}, {h.employer.yH.toFixed(2)}) U_candidate = {employerOfferValues.candidateU.toFixed(3)} |
+                            {" "}U_employer = {employerOfferValues.employerU.toFixed(3)}
                           </div>
                         </>
                       );
@@ -359,17 +359,17 @@ export default function App() {
               <button onClick={() => void syncAction({ type: "reset" })}>Play again</button>
             )}
 
-            {lastHumanOffer && lastAIOffer && (
+            {lastCandidateOffer && lastEmployerOffer && (
               <div style={{ fontSize: 12, color: "#6b7280" }}>
                 {state.alpha != null && (() => {
-                  const lastHumanValues = offerUtilities(lastHumanOffer.xH, lastHumanOffer.yH, state.alpha);
-                  const lastAIValues = offerUtilities(lastAIOffer.xH, lastAIOffer.yH, state.alpha);
+                  const lastCandidateValues = offerUtilities(lastCandidateOffer.xH, lastCandidateOffer.yH, state.alpha);
+                  const lastEmployerValues = offerUtilities(lastEmployerOffer.xH, lastEmployerOffer.yH, state.alpha);
                   return (
                     <>
-                      Last human offer: ({lastHumanOffer.xH.toFixed(2)}, {lastHumanOffer.yH.toFixed(2)}) U_you = {lastHumanValues.humanU.toFixed(3)} | U_ai ={" "}
-                      {lastHumanValues.aiU.toFixed(3)} <br />
-                      Last AI offer: ({lastAIOffer.xH.toFixed(2)}, {lastAIOffer.yH.toFixed(2)}) U_you = {lastAIValues.humanU.toFixed(3)} | U_ai ={" "}
-                      {lastAIValues.aiU.toFixed(3)}
+                      Last candidate offer: ({lastCandidateOffer.xH.toFixed(2)}, {lastCandidateOffer.yH.toFixed(2)}) U_candidate = {lastCandidateValues.candidateU.toFixed(3)} |
+                      {" "}U_employer = {lastCandidateValues.employerU.toFixed(3)} <br />
+                      Last employer offer: ({lastEmployerOffer.xH.toFixed(2)}, {lastEmployerOffer.yH.toFixed(2)}) U_candidate = {lastEmployerValues.candidateU.toFixed(3)} |
+                      {" "}U_employer = {lastEmployerValues.employerU.toFixed(3)}
                     </>
                   );
                 })()}
