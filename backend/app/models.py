@@ -46,6 +46,8 @@ class HistoryEntry(BaseModel):
 
 class GameState(BaseModel):
     alpha: Optional[float] = None
+    endowXH: Optional[float] = Field(default=None, description="Candidate initial x (bottom-left origin); p*(W,H) share.")
+    endowYH: Optional[float] = Field(default=None, description="Candidate initial y; same p as endowXH for both goods.")
     phase: Phase = "setup"
     round: int = 1
     offers: list[Offer] = Field(default_factory=list)

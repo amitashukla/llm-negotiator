@@ -77,11 +77,11 @@ export default function App() {
   }, []);
 
   const lastCandidateOffer = useMemo(
-    () => state?.offers.filter((o) => o.type === "candidate").slice(-1)[0],
+    () => (state?.offers ?? []).filter((o) => o.type === "candidate").slice(-1)[0],
     [state?.offers]
   );
   const lastEmployerOffer = useMemo(
-    () => state?.offers.filter((o) => o.type === "employer").slice(-1)[0],
+    () => (state?.offers ?? []).filter((o) => o.type === "employer").slice(-1)[0],
     [state?.offers]
   );
   const currentOffer = useMemo(() => {
@@ -113,7 +113,9 @@ export default function App() {
       .join(" ");
   }, [state?.indifferenceCurves]);
 
-  const endowC = toCanvas(5, 5);
+  const endowX = state?.endowXH ?? 5;
+  const endowY = state?.endowYH ?? 5;
+  const endowC = toCanvas(endowX, endowY);
   const pendingC = state?.pending ? toCanvas(state.pending.xH, state.pending.yH) : null;
   const hoverC = hover ? toCanvas(hover.xH, hover.yH) : null;
 
@@ -170,6 +172,9 @@ export default function App() {
   if (!state) {
     return <div style={{ padding: 24 }}>{error || "Could not load state."}</div>;
   }
+
+  const offers = state.offers ?? [];
+  const history = state.history ?? [];
 
   return (
     <div style={{ padding: "1.5rem 1rem", color: "#1f2937" }}>
@@ -238,13 +243,13 @@ export default function App() {
 
               <circle cx={endowC.cx} cy={endowC.cy} r={5} fill={COLORS.endow} opacity={0.8} />
 
-              {state.offers.map((o: Offer, i: number) => {
+              {offers.map((o: Offer, i: number) => {
                 const c = toCanvas(o.xH, o.yH);
                 const col = o.type === "candidate" ? COLORS.candidate : COLORS.employer;
                 return (
                   <g key={`${o.type}-${o.round}-${i}`}>
                     {i > 0 && (() => {
-                      const p = toCanvas(state.offers[i - 1].xH, state.offers[i - 1].yH);
+                      const p = toCanvas(offers[i - 1].xH, offers[i - 1].yH);
                       return <line x1={p.cx} y1={p.cy} x2={c.cx} y2={c.cy} stroke="#9ca3af" strokeWidth={1} strokeDasharray="2,2" />;
                     })()}
                     <circle cx={c.cx} cy={c.cy} r={6} fill={col} opacity={0.85} />
@@ -364,10 +369,10 @@ export default function App() {
               </div>
             )}
 
-            {state.history.length > 0 && (
+            {history.length > 0 && (
               <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", padding: "1rem 1.25rem" }}>
                 <p style={{ margin: "0 0 8px", fontSize: 13, fontWeight: 600 }}>Round history</p>
-                {state.history.map((h) => (
+                {history.map((h) => (
                   <div key={h.round} style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
                     <div>
                       <strong>R{h.round}</strong> alpha_hat {h.alphaHat.toFixed(2)}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import random
 from typing import Optional
 
 from .models import CurvePoint, GameState, HistoryEntry, IndifferenceCurves, NashEstimate, Offer, Posterior
@@ -12,6 +13,17 @@ ROUNDS = 5
 DELTA = 0.7
 EPSILON = 0.08
 ACCEPT_RADIUS = 0.3
+
+ENDOW_P_MEAN = 0.25
+ENDOW_P_STDEV = 0.05
+
+
+def sample_initial_endowment() -> tuple[float, float]:
+    """Candidate receives p * (W, H) with p ~ N(mu, sigma), clipped to keep allocations interior."""
+    p = random.gauss(ENDOW_P_MEAN, ENDOW_P_STDEV)
+    eps = 1e-3
+    p = min(max(p, eps), 1.0 - eps)
+    return p * W, p * H
 
 
 def cd_util(x: float, y: float, a: float) -> float:
@@ -142,8 +154,11 @@ def make_default_state() -> GameState:
 def start_game(alpha: float) -> GameState:
     if alpha <= 0 or alpha >= 1:
         raise ValueError("Alpha must be between 0 and 1 (exclusive).")
+    ex, ey = sample_initial_endowment()
     return GameState(
         alpha=alpha,
+        endowXH=ex,
+        endowYH=ey,
         phase="play",
         round=1,
         offers=[],

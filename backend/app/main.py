@@ -69,6 +69,8 @@ def apply_action(session_id: str, payload: ActionRequest) -> SessionResponse:
                 "history": [],
                 "pending": None,
                 "alpha": None,
+                "endowXH": None,
+                "endowYH": None,
                 "nashEst": None,
                 "trueNash": None,
                 "indifferenceCurves": None,

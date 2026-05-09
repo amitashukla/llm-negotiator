@@ -37,6 +37,9 @@ export interface HistoryEntry {
 
 export interface GameState {
   alpha: number | null;
+  /** Candidate initial allocation (symmetric p on both goods); set when play starts */
+  endowXH: number | null;
+  endowYH: number | null;
   phase: Phase;
   round: number;
   offers: Offer[];
