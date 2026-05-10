@@ -1,6 +1,8 @@
 export type Phase = "setup" | "play" | "done";
 export type OfferType = "candidate" | "employer";
 export type EmployerRule = "nash" | "lens";
+export type GameMode = "blind" | "omniscient";
+export type AppScreen = "opening" | "game" | "reveal";
 
 export interface Offer {
   xH: number;

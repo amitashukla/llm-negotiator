@@ -1,169 +1,47 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { API_BASE, createSession, getSession, sendAction, startGame } from "./api";
-import type { EmployerRule, GameState, Offer } from "./types";
+import type { AppScreen, EmployerRule, GameMode, GameState } from "./types";
+import { validateApiResponse } from "./utils/validate";
+import OpeningScreen from "./components/OpeningScreen";
+import GameScreen from "./components/GameScreen";
+import RevealScreen from "./components/RevealScreen";
 
-const W = 10;
-const H = 10;
-const EMPLOYER_BETA = 0.8;
-const ROUNDS = 5;
-const CANVAS = 420;
-const PAD = 48;
-const INNER = CANVAS - 2 * PAD;
 const SESSION_KEY = "edgeworth_session_id";
-
-const COLORS = {
-  candidate: "#185FA5",
-  employer: "#993C1D",
-  endow: "#5F5E5A",
-  offer: "#BA7517",
-  agree: "#1D9E75",
-  /** True ICs through initial endowment (phase done) */
-  icEndowment: "#16a34a",
-  employerNashGuess: "#16a34a",
-  /** Estimated lens: amber; true lens: cyan */
-  estimatedLens: "#f59e0b",
-  trueLens: "#06b6d4",
-};
-
-function toCanvas(xH: number, yH: number) {
-  return { cx: PAD + (xH / W) * INNER, cy: PAD + ((H - yH) / H) * INNER };
-}
-
-function fromCanvas(cx: number, cy: number) {
-  return { xH: ((cx - PAD) / INNER) * W, yH: H - ((cy - PAD) / INNER) * H };
-}
-
-function cobbDouglasUtility(x: number, y: number, alpha: number) {
-  if (x <= 0 || y <= 0) {
-    return 0;
-  }
-  return x ** alpha * y ** (1 - alpha);
-}
-
-function offerUtilities(xH: number, yH: number, candidateAlpha: number) {
-  const candidateU = cobbDouglasUtility(xH, yH, candidateAlpha);
-  const employerX = W - xH;
-  const employerY = H - yH;
-  const employerU = cobbDouglasUtility(employerX, employerY, EMPLOYER_BETA);
-  return { candidateU, employerU, employerX, employerY };
-}
-
-/** Mirrors backend/app/game_engine.py — used so green ICs render even if API omits precomputed curves. */
-function candidateIcY(xC: number, alpha: number, utility: number): number | null {
-  if (xC <= 0 || xC >= W) return null;
-  const base = xC ** alpha;
-  if (base === 0) return null;
-  return (utility / base) ** (1 / (1 - alpha));
-}
-
-function employerIcY(xC: number, utility: number): number | null {
-  if (xC <= 0 || xC >= W) return null;
-  const employerX = W - xC;
-  const base = employerX ** EMPLOYER_BETA;
-  if (base === 0) return null;
-  const employerY = (utility / base) ** (1 / (1 - EMPLOYER_BETA));
-  return H - employerY;
-}
-
-function buildAllocIcPath(
-  allocXH: number,
-  allocYH: number,
-  alpha: number,
-  side: "candidate" | "employer"
-): string | null {
-  const candidateU = cobbDouglasUtility(allocXH, allocYH, alpha);
-  const employerU = cobbDouglasUtility(W - allocXH, H - allocYH, EMPLOYER_BETA);
-  const samples = 240;
-  const pts: { xH: number; yH: number }[] = [];
-  for (let i = 1; i < samples; i++) {
-    const xC = (i / samples) * (W - 0.02) + 0.01;
-    const y =
-      side === "candidate"
-        ? candidateIcY(xC, alpha, candidateU)
-        : employerIcY(xC, employerU);
-    if (y !== null && y >= 0 && y <= H) {
-      pts.push({ xH: xC, yH: y });
-    }
-  }
-  if (pts.length < 2) return null;
-  return pts
-    .map((p, i) => {
-      const c = toCanvas(p.xH, p.yH);
-      return `${i === 0 ? "M" : "L"} ${c.cx.toFixed(2)} ${c.cy.toFixed(2)}`;
-    })
-    .join(" ");
-}
-
-/**
- * Build a closed SVG path for the lens region: all (x,y) where both the candidate
- * (using candidateAlpha) and the employer gain relative to the endowment.
- * Upper boundary = employer IC through endowment; lower = candidate IC through endowment.
- */
-function buildLensPath(endowX: number, endowY: number, candidateAlpha: number): string | null {
-  const uCEndow = cobbDouglasUtility(endowX, endowY, candidateAlpha);
-  const uEEndow = cobbDouglasUtility(W - endowX, H - endowY, EMPLOYER_BETA);
-  const samples = 300;
-  const upperPts: { xH: number; yH: number }[] = [];
-  const lowerPts: { xH: number; yH: number }[] = [];
-
-  for (let i = 1; i < samples; i++) {
-    const xC = (i / samples) * (W - 0.02) + 0.01;
-    const yC = candidateIcY(xC, candidateAlpha, uCEndow);
-    const yE = employerIcY(xC, uEEndow);
-    if (yC === null || yE === null) continue;
-    if (yC < 0 || yC > H || yE < 0 || yE > H) continue;
-    if (yE > yC) {
-      upperPts.push({ xH: xC, yH: yE });
-      lowerPts.push({ xH: xC, yH: yC });
-    }
-  }
-
-  if (upperPts.length < 2) return null;
-  const allPts = [...upperPts, ...[...lowerPts].reverse()];
-  return (
-    allPts
-      .map((p, i) => {
-        const c = toCanvas(p.xH, p.yH);
-        return `${i === 0 ? "M" : "L"} ${c.cx.toFixed(2)} ${c.cy.toFixed(2)}`;
-      })
-      .join(" ") + " Z"
-  );
-}
 
 export default function App() {
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [state, setState] = useState<GameState | null>(null);
-  const [alphaInput, setAlphaInput] = useState("0.5");
-  const [employerRule, setEmployerRule] = useState<EmployerRule>("nash");
-  const [hover, setHover] = useState<{ xH: number; yH: number } | null>(null);
+  const [gameState, setGameState] = useState<GameState | null>(null);
+  const [screen, setScreen] = useState<AppScreen>("opening");
+  const [mode, setMode] = useState<GameMode>("blind");
+  const [pendingPoint, setPendingPoint] = useState<{ xH: number; yH: number } | null>(null);
+  const [actionLoading, setActionLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const svgRef = useRef<SVGSVGElement>(null);
+  const [apiWarnings, setApiWarnings] = useState<string[]>([]);
 
   useEffect(() => {
     const init = async () => {
       try {
         setLoading(true);
-        const storedSessionId = localStorage.getItem(SESSION_KEY);
-        if (storedSessionId) {
-          const existing = await getSession(storedSessionId);
-          setSessionId(existing.session_id);
-          setState(existing.state);
-          return;
+        const stored = localStorage.getItem(SESSION_KEY);
+        let res;
+        if (stored) {
+          res = await getSession(stored);
+        } else {
+          res = await createSession();
+          localStorage.setItem(SESSION_KEY, res.session_id);
         }
-        const created = await createSession();
-        localStorage.setItem(SESSION_KEY, created.session_id);
-        setSessionId(created.session_id);
-        setState(created.state);
+        setSessionId(res.session_id);
+        // Restore to the screen matching the saved phase
+        applyState(res.state);
       } catch (e) {
         localStorage.removeItem(SESSION_KEY);
         const net =
           e instanceof TypeError ||
-          (e instanceof Error &&
-            /network|fetch|failed to fetch|load failed/i.test(e.message));
+          (e instanceof Error && /network|fetch|failed to fetch|load failed/i.test(e.message));
         setError(
           net
-            ? `Cannot reach API at ${API_BASE}. Start the backend (e.g. docker compose up backend), ensure port 8000 is free, and rebuild after backend/CORS changes.`
+            ? `Cannot reach API at ${API_BASE}. Start the backend and ensure port 8000 is free.`
             : "Could not initialize session. Make sure backend is running."
         );
       } finally {
@@ -171,511 +49,113 @@ export default function App() {
       }
     };
     void init();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const lastCandidateOffer = useMemo(
-    () => (state?.offers ?? []).filter((o) => o.type === "candidate").slice(-1)[0],
-    [state?.offers]
-  );
-  const lastEmployerOffer = useMemo(
-    () => (state?.offers ?? []).filter((o) => o.type === "employer").slice(-1)[0],
-    [state?.offers]
-  );
-  const currentOffer = useMemo(() => {
-    if (!state) return null;
-    return state.pending ?? state.agreed ?? lastEmployerOffer ?? lastCandidateOffer ?? null;
-  }, [state, lastEmployerOffer, lastCandidateOffer]);
-  const currentUtilities = useMemo(() => {
-    if (!state || state.alpha == null || !currentOffer) return null;
-    return offerUtilities(currentOffer.xH, currentOffer.yH, state.alpha);
-  }, [state, currentOffer]);
-  const candidateCurvePath = useMemo(() => {
-    const points = state?.indifferenceCurves?.candidate ?? [];
-    if (points.length < 2) return null;
-    return points
-      .map((p, i) => {
-        const c = toCanvas(p.xH, p.yH);
-        return `${i === 0 ? "M" : "L"} ${c.cx.toFixed(2)} ${c.cy.toFixed(2)}`;
-      })
-      .join(" ");
-  }, [state?.indifferenceCurves]);
-  const employerCurvePath = useMemo(() => {
-    const points = state?.indifferenceCurves?.employer ?? [];
-    if (points.length < 2) return null;
-    return points
-      .map((p, i) => {
-        const c = toCanvas(p.xH, p.yH);
-        return `${i === 0 ? "M" : "L"} ${c.cx.toFixed(2)} ${c.cy.toFixed(2)}`;
-      })
-      .join(" ");
-  }, [state?.indifferenceCurves]);
-
-  const endowCandidateIcPath = useMemo(() => {
-    if (!state || state.phase !== "done" || state.alpha == null) return null;
-    const ex = state.endowXH ?? 5;
-    const ey = state.endowYH ?? 5;
-    const api = state.endowmentIndifferenceCurves?.candidate ?? [];
-    if (api.length >= 2) {
-      return api
-        .map((p, i) => {
-          const c = toCanvas(p.xH, p.yH);
-          return `${i === 0 ? "M" : "L"} ${c.cx.toFixed(2)} ${c.cy.toFixed(2)}`;
-        })
-        .join(" ");
-    }
-    return buildAllocIcPath(ex, ey, state.alpha, "candidate");
-  }, [state?.phase, state?.alpha, state?.endowXH, state?.endowYH, state?.endowmentIndifferenceCurves]);
-
-  const endowEmployerIcPath = useMemo(() => {
-    if (!state || state.phase !== "done" || state.alpha == null) return null;
-    const ex = state.endowXH ?? 5;
-    const ey = state.endowYH ?? 5;
-    const api = state.endowmentIndifferenceCurves?.employer ?? [];
-    if (api.length >= 2) {
-      return api
-        .map((p, i) => {
-          const c = toCanvas(p.xH, p.yH);
-          return `${i === 0 ? "M" : "L"} ${c.cx.toFixed(2)} ${c.cy.toFixed(2)}`;
-        })
-        .join(" ");
-    }
-    return buildAllocIcPath(ex, ey, state.alpha, "employer");
-  }, [state?.phase, state?.alpha, state?.endowXH, state?.endowYH, state?.endowmentIndifferenceCurves]);
-
-  // Estimated lens (alpha_hat): shown during play and done
-  const estimatedLensPath = useMemo(() => {
-    if (!state || state.phase === "setup") return null;
-    if (state.endowXH == null || state.endowYH == null) return null;
-    return buildLensPath(state.endowXH, state.endowYH, state.alphaHat);
-  }, [state?.alphaHat, state?.endowXH, state?.endowYH, state?.phase]);
-
-  // True lens (true alpha): shown only in done phase
-  const trueLensPath = useMemo(() => {
-    if (!state || state.phase !== "done" || state.alpha == null) return null;
-    if (state.endowXH == null || state.endowYH == null) return null;
-    return buildLensPath(state.endowXH, state.endowYH, state.alpha);
-  }, [state?.alpha, state?.endowXH, state?.endowYH, state?.phase]);
-
-  const endowX = state?.endowXH ?? 5;
-  const endowY = state?.endowYH ?? 5;
-  const endowC = toCanvas(endowX, endowY);
-  const pendingC = state?.pending ? toCanvas(state.pending.xH, state.pending.yH) : null;
-  const hoverC = hover ? toCanvas(hover.xH, hover.yH) : null;
-
-  async function syncAction(
-    payload: { type: "propose"; xH: number; yH: number } | { type: "confirm" | "cancel" | "reset" }
-  ) {
-    if (!sessionId) return;
-    try {
-      setError("");
-      const res = await sendAction(sessionId, payload);
-      setState(res.state);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Request failed");
+  function applyState(state: GameState, forceScreen?: AppScreen) {
+    setGameState(state);
+    if (forceScreen) {
+      setScreen(forceScreen);
+    } else if (state.phase === "setup") {
+      setScreen("opening");
+    } else if (state.phase === "play") {
+      setScreen("game");
+    } else if (state.phase === "done") {
+      setScreen("reveal");
     }
   }
 
-  async function handleStart() {
+  async function handleStartGame(alpha: number, selectedMode: GameMode, rule: EmployerRule) {
     if (!sessionId) return;
     try {
       setError("");
-      const parsed = Number(alphaInput);
-      const res = await startGame(sessionId, parsed, employerRule);
-      setState(res.state);
+      setMode(selectedMode);
+      const res = await startGame(sessionId, alpha, rule);
+      const warnings = validateApiResponse(res.state, "start");
+      if (warnings.length > 0) setApiWarnings(warnings);
+      applyState(res.state);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Start failed");
     }
   }
 
-  function handleSVGClick(e: React.MouseEvent<SVGSVGElement>) {
-    if (!state || state.phase !== "play") return;
-    const rect = svgRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const sx = CANVAS / rect.width;
-    const sy = CANVAS / rect.height;
-    const { xH, yH } = fromCanvas((e.clientX - rect.left) * sx, (e.clientY - rect.top) * sy);
-    if (xH < 0 || xH > W || yH < 0 || yH > H) return;
-    void syncAction({ type: "propose", xH, yH });
+  async function handleChartClick(xH: number, yH: number) {
+    if (!sessionId || actionLoading) return;
+    setActionLoading(true);
+    setPendingPoint({ xH, yH });
+    try {
+      setError("");
+      await sendAction(sessionId, { type: "propose", xH, yH });
+      const confirmRes = await sendAction(sessionId, { type: "confirm" });
+      const warnings = validateApiResponse(
+        confirmRes.state,
+        confirmRes.state.phase === "done" ? "done" : "play"
+      );
+      if (warnings.length > 0) setApiWarnings(warnings);
+      applyState(confirmRes.state);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Action failed");
+    } finally {
+      setPendingPoint(null);
+      setActionLoading(false);
+    }
   }
 
-  function handleSVGMove(e: React.MouseEvent<SVGSVGElement>) {
-    if (!state || state.phase !== "play") return;
-    const rect = svgRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const sx = CANVAS / rect.width;
-    const sy = CANVAS / rect.height;
-    const { xH, yH } = fromCanvas((e.clientX - rect.left) * sx, (e.clientY - rect.top) * sy);
-    setHover(xH >= 0 && xH <= W && yH >= 0 && yH <= H ? { xH, yH } : null);
+  async function handlePlayAgain() {
+    if (!sessionId) return;
+    try {
+      setError("");
+      setApiWarnings([]);
+      const res = await sendAction(sessionId, { type: "reset" });
+      applyState(res.state);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Reset failed");
+    }
   }
 
   if (loading) {
-    return <div style={{ padding: 24 }}>Loading...</div>;
+    return (
+      <div style={{ padding: 32, color: "#6b7280", fontSize: 14 }}>Loading…</div>
+    );
   }
 
-  if (!state) {
-    return <div style={{ padding: 24 }}>{error || "Could not load state."}</div>;
+  if (!gameState) {
+    return (
+      <div style={{ padding: 32, color: "#ef4444", fontSize: 14 }}>
+        {error || "Could not load game state."}
+      </div>
+    );
   }
 
-  const offers = state.offers ?? [];
-  const history = state.history ?? [];
+  if (screen === "game" && gameState.phase === "play") {
+    return (
+      <GameScreen
+        mode={mode}
+        gameState={gameState}
+        pendingPoint={pendingPoint}
+        actionLoading={actionLoading}
+        apiWarnings={apiWarnings}
+        onDismissWarning={() => setApiWarnings([])}
+        onChartClick={(x, y) => void handleChartClick(x, y)}
+      />
+    );
+  }
 
+  if (screen === "reveal" && gameState.phase === "done") {
+    return (
+      <RevealScreen
+        mode={mode}
+        gameState={gameState}
+        onPlayAgain={() => void handlePlayAgain()}
+      />
+    );
+  }
+
+  // Default: opening screen (setup phase or initial load)
   return (
-    <div style={{ padding: "1.5rem 1rem", color: "#1f2937" }}>
-      <h2 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 0.25rem" }}>Edgeworth box bargaining</h2>
-      <p style={{ fontSize: 13, color: "#6b7280", margin: "0 0 1.25rem" }}>
-        5-round alternating offers with FastAPI game engine and React UI
-      </p>
-
-      {state.phase === "setup" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 420 }}>
-          <div style={{ background: "#ffffff", borderRadius: 10, border: "1px solid #e5e7eb", padding: "1rem 1.25rem" }}>
-            <p style={{ margin: "0 0 8px", fontSize: 14, fontWeight: 600 }}>Candidate utility function</p>
-            <p style={{ margin: "0 0 12px", fontSize: 13, color: "#6b7280" }}>
-              U_candidate = x^alpha * y^(1-alpha) and Employer does not know your alpha
-            </p>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <label style={{ fontSize: 13, color: "#6b7280" }}>Your alpha =</label>
-              <input
-                type="number"
-                min="0.01"
-                max="0.99"
-                step="0.01"
-                value={alphaInput}
-                onChange={(e) => setAlphaInput(e.target.value)}
-                style={{ width: 80 }}
-              />
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
-              <label style={{ fontSize: 13, color: "#6b7280" }}>Employer rule:</label>
-              <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 4 }}>
-                <input
-                  type="radio"
-                  name="employerRule"
-                  value="nash"
-                  checked={employerRule === "nash"}
-                  onChange={() => setEmployerRule("nash")}
-                />
-                Nash
-              </label>
-              <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 4 }}>
-                <input
-                  type="radio"
-                  name="employerRule"
-                  value="lens"
-                  checked={employerRule === "lens"}
-                  onChange={() => setEmployerRule("lens")}
-                />
-                Lens
-              </label>
-            </div>
-          </div>
-          <button onClick={handleStart} style={{ alignSelf: "flex-start" }}>
-            Start game
-          </button>
-        </div>
-      )}
-
-      {(state.phase === "play" || state.phase === "done") && (
-        <div style={{ display: "flex", gap: "1.5rem", flexWrap: "wrap" }}>
-          <div style={{ flexShrink: 0 }}>
-            <svg
-              ref={svgRef}
-              width={CANVAS}
-              height={CANVAS}
-              viewBox={`0 0 ${CANVAS} ${CANVAS}`}
-              style={{ cursor: state.phase === "play" ? "crosshair" : "default", display: "block", maxWidth: "100%" }}
-              onClick={handleSVGClick}
-              onMouseMove={handleSVGMove}
-              onMouseLeave={() => setHover(null)}
-            >
-              <rect x={PAD} y={PAD} width={INNER} height={INNER} fill="#fff" stroke="#d1d5db" strokeWidth={1} />
-
-              {[0, 2, 4, 6, 8, 10].map((v) => {
-                const cx = PAD + (v / W) * INNER;
-                const cy = PAD + ((H - v) / H) * INNER;
-                return (
-                  <g key={v}>
-                    <line x1={cx} y1={PAD + INNER} x2={cx} y2={PAD + INNER + 4} stroke="#9ca3af" strokeWidth={1} />
-                    <text x={cx} y={PAD + INNER + 14} textAnchor="middle" fontSize={10} fill="#6b7280">
-                      {v}
-                    </text>
-                    <line x1={PAD - 4} y1={cy} x2={PAD} y2={cy} stroke="#9ca3af" strokeWidth={1} />
-                    <text x={PAD - 8} y={cy + 4} textAnchor="end" fontSize={10} fill="#6b7280">
-                      {v}
-                    </text>
-                  </g>
-                );
-              })}
-
-              {/* True lens (done phase only, cyan) */}
-              {state.phase === "done" && trueLensPath && (
-                <path d={trueLensPath} fill={COLORS.trueLens} fillOpacity={0.15} stroke={COLORS.trueLens} strokeOpacity={0.5} strokeWidth={1} />
-              )}
-
-              {/* Estimated lens (play + done, amber) */}
-              {estimatedLensPath && (
-                <path d={estimatedLensPath} fill={COLORS.estimatedLens} fillOpacity={0.15} stroke={COLORS.estimatedLens} strokeOpacity={0.5} strokeWidth={1} />
-              )}
-
-              <circle cx={endowC.cx} cy={endowC.cy} r={5} fill={COLORS.endow} opacity={0.8} />
-
-              {offers.map((o: Offer, i: number) => {
-                const c = toCanvas(o.xH, o.yH);
-                const col = o.type === "candidate" ? COLORS.candidate : COLORS.employer;
-                return (
-                  <g key={`${o.type}-${o.round}-${i}`}>
-                    {i > 0 && (() => {
-                      const p = toCanvas(offers[i - 1].xH, offers[i - 1].yH);
-                      return <line x1={p.cx} y1={p.cy} x2={c.cx} y2={c.cy} stroke="#9ca3af" strokeWidth={1} strokeDasharray="2,2" />;
-                    })()}
-                    <circle cx={c.cx} cy={c.cy} r={6} fill={col} opacity={0.85} />
-                    <text x={c.cx + 8} y={c.cy + 4} fontSize={10} fill={col}>
-                      {o.type === "candidate" ? "C" : "E"}
-                      {o.round}
-                    </text>
-                  </g>
-                );
-              })}
-
-              {state.agreed && (() => {
-                const c = toCanvas(state.agreed.xH, state.agreed.yH);
-                return (
-                  <>
-                    <circle cx={c.cx} cy={c.cy} r={10} fill="none" stroke={COLORS.agree} strokeWidth={2} />
-                    <circle cx={c.cx} cy={c.cy} r={4} fill={COLORS.agree} />
-                  </>
-                );
-              })()}
-
-              {state.phase === "done" && endowCandidateIcPath && (
-                <path
-                  d={endowCandidateIcPath}
-                  fill="none"
-                  stroke={COLORS.icEndowment}
-                  strokeWidth={2}
-                  opacity={0.92}
-                />
-              )}
-
-              {state.phase === "done" && endowEmployerIcPath && (
-                <path
-                  d={endowEmployerIcPath}
-                  fill="none"
-                  stroke={COLORS.icEndowment}
-                  strokeWidth={2}
-                  opacity={0.92}
-                />
-              )}
-
-              {state.phase === "done" && candidateCurvePath && (
-                <path d={candidateCurvePath} fill="none" stroke={COLORS.candidate} strokeWidth={2} strokeDasharray="7,4" opacity={0.85} />
-              )}
-
-              {state.phase === "done" && employerCurvePath && (
-                <path d={employerCurvePath} fill="none" stroke={COLORS.employer} strokeWidth={2} strokeDasharray="7,4" opacity={0.85} />
-              )}
-
-              {state.trueNash && state.phase === "done" && (() => {
-                const c = toCanvas(state.trueNash.xH, state.trueNash.yH);
-                return (
-                  <>
-                    <line x1={c.cx - 6} y1={c.cy - 6} x2={c.cx + 6} y2={c.cy + 6} stroke="#111827" strokeWidth={2} />
-                    <line x1={c.cx + 6} y1={c.cy - 6} x2={c.cx - 6} y2={c.cy + 6} stroke="#111827" strokeWidth={2} />
-                  </>
-                );
-              })()}
-
-              {state.phase === "done" && state.nashEst && (() => {
-                const c = toCanvas(state.nashEst.xH, state.nashEst.yH);
-                return (
-                  <circle
-                    cx={c.cx}
-                    cy={c.cy}
-                    r={8}
-                    fill={COLORS.employerNashGuess}
-                    stroke="#ffffff"
-                    strokeWidth={2}
-                  />
-                );
-              })()}
-
-              {pendingC && (
-                <>
-                  <line x1={endowC.cx} y1={endowC.cy} x2={pendingC.cx} y2={pendingC.cy} stroke={COLORS.offer} strokeWidth={1} strokeDasharray="3,2" />
-                  <circle cx={pendingC.cx} cy={pendingC.cy} r={7} fill="none" stroke={COLORS.offer} strokeWidth={2} />
-                  <circle cx={pendingC.cx} cy={pendingC.cy} r={3} fill={COLORS.offer} />
-                </>
-              )}
-
-              {hoverC && !state.pending && (
-                <>
-                  <line x1={hoverC.cx} y1={PAD} x2={hoverC.cx} y2={PAD + INNER} stroke="#9ca3af" strokeWidth={1} strokeDasharray="2,2" />
-                  <line x1={PAD} y1={hoverC.cy} x2={PAD + INNER} y2={hoverC.cy} stroke="#9ca3af" strokeWidth={1} strokeDasharray="2,2" />
-                  <circle cx={hoverC.cx} cy={hoverC.cy} r={4} fill="none" stroke="#6b7280" strokeWidth={1.5} />
-                </>
-              )}
-            </svg>
-          </div>
-
-          <div style={{ flex: 1, minWidth: 220, display: "flex", flexDirection: "column", gap: 12 }}>
-            <div style={{ display: "flex", gap: 6 }}>
-              {Array.from({ length: ROUNDS }, (_, i) => (
-                <div
-                  key={i}
-                  style={{
-                    width: 32,
-                    height: 32,
-                    borderRadius: 6,
-                    background: i + 1 < state.round ? "#dcfce7" : i + 1 === state.round && state.phase === "play" ? "#dbeafe" : "#f3f4f6",
-                    border: "1px solid #d1d5db",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: 13,
-                    fontWeight: 600
-                  }}
-                >
-                  {i + 1}
-                </div>
-              ))}
-            </div>
-
-            <div style={{ background: "#fff", borderRadius: 8, border: "1px solid #e5e7eb", padding: "0.75rem 1rem", fontSize: 13, color: "#4b5563" }}>
-              {state.msg}
-            </div>
-
-            {state.pending && state.phase === "play" && (
-              <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={() => void syncAction({ type: "confirm" })}>Confirm offer</button>
-                <button onClick={() => void syncAction({ type: "cancel" })}>Cancel</button>
-              </div>
-            )}
-
-            <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", padding: "1rem 1.25rem" }}>
-              <p style={{ margin: "0 0 8px", fontSize: 13, fontWeight: 600 }}>Employer belief about your alpha</p>
-              <p style={{ margin: "0 0 4px", fontSize: 12, color: "#6b7280" }}>
-                Rule: <strong>{state.employerRule === "lens" ? "Lens (endowment-optimal)" : "Nash bargaining"}</strong>
-              </p>
-              <p style={{ margin: "0 0 4px", fontSize: 12, color: "#6b7280" }}>
-                Posterior: Beta({state.posterior.a.toFixed(1)}, {state.posterior.b.toFixed(1)})
-              </p>
-              <p style={{ margin: "0 0 4px", fontSize: 12, color: "#6b7280" }}>
-                Posterior mean alpha_hat = <strong>{state.alphaHat.toFixed(3)}</strong> and true alpha ={" "}
-                <strong>{state.alpha ?? "-"}</strong>
-              </p>
-              {state.nashEst && (
-                <p style={{ margin: "0 0 4px", fontSize: 12, color: "#6b7280" }}>
-                  Nash estimate: you ({state.nashEst.xH.toFixed(2)}, {state.nashEst.yH.toFixed(2)})
-                </p>
-              )}
-              {state.phase === "play" && (
-                <p style={{ margin: 0, fontSize: 12, color: "#6b7280" }}>
-                  <span style={{ color: COLORS.estimatedLens, fontWeight: 600 }}>Amber region</span>: employer&apos;s estimated lens (α̂)
-                </p>
-              )}
-            </div>
-
-            {currentOffer && currentUtilities && (
-              <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", padding: "1rem 1.25rem" }}>
-                <p style={{ margin: "0 0 8px", fontSize: 13, fontWeight: 600 }}>Current offer utility</p>
-                <p style={{ margin: "0 0 4px", fontSize: 12, color: "#6b7280" }}>
-                  Candidate: ({currentOffer.xH.toFixed(2)}, {currentOffer.yH.toFixed(2)}) U = {currentUtilities.candidateU.toFixed(3)}
-                </p>
-                <p style={{ margin: 0, fontSize: 12, color: "#6b7280" }}>
-                  Employer: ({currentUtilities.employerX.toFixed(2)}, {currentUtilities.employerY.toFixed(2)}) U = {currentUtilities.employerU.toFixed(3)}
-                </p>
-              </div>
-            )}
-
-            {history.length > 0 && (
-              <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", padding: "1rem 1.25rem" }}>
-                <p style={{ margin: "0 0 8px", fontSize: 13, fontWeight: 600 }}>Round history</p>
-                {history.map((h) => (
-                  <div key={h.round} style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
-                    <div>
-                      <strong>R{h.round}</strong> alpha_hat {h.alphaHat.toFixed(2)}
-                    </div>
-                    {state.alpha != null && (() => {
-                      const candidateOfferValues = offerUtilities(h.candidate.xH, h.candidate.yH, state.alpha);
-                      const employerOfferValues = offerUtilities(h.employer.xH, h.employer.yH, state.alpha);
-                      return (
-                        <>
-                          <div>
-                            Candidate: ({h.candidate.xH.toFixed(2)}, {h.candidate.yH.toFixed(2)}) U = {candidateOfferValues.candidateU.toFixed(3)} |
-                            {" "}Employer: ({candidateOfferValues.employerX.toFixed(2)}, {candidateOfferValues.employerY.toFixed(2)}) U = {candidateOfferValues.employerU.toFixed(3)}
-                          </div>
-                          <div>
-                            Employer offer to Candidate: ({h.employer.xH.toFixed(2)}, {h.employer.yH.toFixed(2)}) U_candidate = {employerOfferValues.candidateU.toFixed(3)} |
-                            {" "}U_employer = {employerOfferValues.employerU.toFixed(3)}
-                          </div>
-                        </>
-                      );
-                    })()}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {state.phase === "done" && (
-              <>
-                {state.trueNash && (
-                  <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", padding: "1rem 1.25rem", fontSize: 12, color: "#4b5563" }}>
-                    <p style={{ margin: "0 0 6px", fontWeight: 600 }}>End-of-bargaining outcomes</p>
-                    <p style={{ margin: "0 0 4px" }}>
-                      True Nash (Nash product maximum): Candidate ({state.trueNash.xH.toFixed(2)}, {state.trueNash.yH.toFixed(2)}) — black × on the box.
-                    </p>
-                    {state.nashEst && (
-                      <p style={{ margin: "0 0 4px" }}>
-                        Employer&apos;s Nash guess (from inferred α̂): Candidate ({state.nashEst.xH.toFixed(2)}, {state.nashEst.yH.toFixed(2)}) — green dot.
-                      </p>
-                    )}
-                    <p style={{ margin: "0 0 4px" }}>
-                      Green curves: true indifference curves for both parties through the initial endowment point.
-                    </p>
-                    <p style={{ margin: "0 0 4px" }}>
-                      <span style={{ color: COLORS.trueLens, fontWeight: 600 }}>Cyan fill</span>: true lens — allocations where both gain vs. endowment (true α).
-                    </p>
-                    <p style={{ margin: "0 0 4px" }}>
-                      <span style={{ color: COLORS.estimatedLens, fontWeight: 600 }}>Amber fill</span>: estimated lens — employer&apos;s belief about the lens (α̂ = {state.alphaHat.toFixed(3)}).
-                    </p>
-                    {state.agreed ? (
-                      <p style={{ margin: 0 }}>
-                        Blue and red dashed curves: indifference curves through the agreed allocation.
-                      </p>
-                    ) : (
-                      <p style={{ margin: 0 }}>No deal: blue/red agreement curves omitted.</p>
-                    )}
-                  </div>
-                )}
-                <button onClick={() => void syncAction({ type: "reset" })}>Play again</button>
-              </>
-            )}
-
-            {lastCandidateOffer && lastEmployerOffer && (
-              <div style={{ fontSize: 12, color: "#6b7280" }}>
-                {state.alpha != null && (() => {
-                  const lastCandidateValues = offerUtilities(lastCandidateOffer.xH, lastCandidateOffer.yH, state.alpha);
-                  const lastEmployerValues = offerUtilities(lastEmployerOffer.xH, lastEmployerOffer.yH, state.alpha);
-                  return (
-                    <>
-                      Last candidate offer: ({lastCandidateOffer.xH.toFixed(2)}, {lastCandidateOffer.yH.toFixed(2)}) U_candidate = {lastCandidateValues.candidateU.toFixed(3)} |
-                      {" "}U_employer = {lastCandidateValues.employerU.toFixed(3)} <br />
-                      Last employer offer: ({lastEmployerOffer.xH.toFixed(2)}, {lastEmployerOffer.yH.toFixed(2)}) U_candidate = {lastEmployerValues.candidateU.toFixed(3)} |
-                      {" "}U_employer = {lastEmployerValues.employerU.toFixed(3)}
-                    </>
-                  );
-                })()}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {error && (
-        <p style={{ marginTop: 12, color: "#b91c1c", fontSize: 13 }}>
-          {error}
-        </p>
-      )}
-    </div>
+    <OpeningScreen
+      onStart={handleStartGame}
+      error={error}
+    />
   );
 }
