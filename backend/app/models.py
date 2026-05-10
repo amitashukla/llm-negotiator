@@ -9,6 +9,7 @@ Phase = Literal["setup", "play", "done"]
 OfferType = Literal["candidate", "employer"]
 ActionType = Literal["propose", "confirm", "cancel", "reset"]
 EmployerRule = Literal["nash", "lens"]
+UiMode = Literal["blind", "omniscient"]
 
 
 class Offer(BaseModel):
@@ -63,11 +64,13 @@ class GameState(BaseModel):
     endowmentIndifferenceCurves: Optional[IndifferenceCurves] = None
     history: list[HistoryEntry] = Field(default_factory=list)
     employerRule: EmployerRule = "nash"
+    uiMode: Optional[UiMode] = None
 
 
 class StartGameRequest(BaseModel):
     alpha: float
     employer_rule: EmployerRule = "nash"
+    ui_mode: Optional[UiMode] = None
 
 
 class ActionRequest(BaseModel):

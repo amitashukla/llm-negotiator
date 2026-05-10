@@ -70,7 +70,7 @@ export default function App() {
     try {
       setError("");
       setMode(selectedMode);
-      const res = await startGame(sessionId, alpha, rule);
+      const res = await startGame(sessionId, alpha, rule, selectedMode);
       const warnings = validateApiResponse(res.state, "start");
       if (warnings.length > 0) setApiWarnings(warnings);
       applyState(res.state);

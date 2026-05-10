@@ -82,6 +82,7 @@ def start_session(session_id: str, payload: StartGameRequest) -> SessionResponse
         new_state = start_game(payload.alpha, employer_rule=payload.employer_rule)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    new_state.uiMode = payload.ui_mode
     store.set(session_id, new_state)
     return SessionResponse(session_id=session_id, state=new_state)
 

@@ -138,6 +138,7 @@ def build_completed_game_document(
         "product_ratio": product_ratio,
         "experiment": {
             "alpha": state.alpha,
+            "ui_mode": state.uiMode,
             "endowment": {"x": state.endowXH, "y": state.endowYH},
             "engine_constants": {"W": W, "H": H, "BETA": BETA, "ROUNDS": ROUNDS},
         },
