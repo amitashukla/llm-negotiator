@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 Phase = Literal["setup", "play", "done"]
 OfferType = Literal["candidate", "employer"]
 ActionType = Literal["propose", "confirm", "cancel", "reset"]
+EmployerRule = Literal["nash", "lens"]
 
 
 class Offer(BaseModel):
@@ -61,10 +62,12 @@ class GameState(BaseModel):
     indifferenceCurves: Optional[IndifferenceCurves] = None
     endowmentIndifferenceCurves: Optional[IndifferenceCurves] = None
     history: list[HistoryEntry] = Field(default_factory=list)
+    employerRule: EmployerRule = "nash"
 
 
 class StartGameRequest(BaseModel):
     alpha: float
+    employer_rule: EmployerRule = "nash"
 
 
 class ActionRequest(BaseModel):

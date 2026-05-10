@@ -61,6 +61,12 @@ def main() -> None:
         action="store_true",
         help="Do not write to MongoDB (still calls Groq).",
     )
+    parser.add_argument(
+        "--employer-rule",
+        choices=["nash", "lens"],
+        default="nash",
+        help="Employer counteroffer rule: 'nash' (default) or 'lens' (endowment-lens optimal).",
+    )
     args = parser.parse_args()
 
     models = args.models if args.models else ["llama-3.3-70b-versatile"]
@@ -93,6 +99,7 @@ def main() -> None:
                         fixed_endowment=args.fixed_endowment,
                         rng=rng,
                         recorded_seed=None,
+                        employer_rule=args.employer_rule,
                     )
                 except (ValueError, RuntimeError) as exc:
                     failed += 1

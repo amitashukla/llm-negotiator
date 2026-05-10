@@ -41,7 +41,7 @@ from app.game_engine import (
     start_game,
 )
 from app.game_record import build_completed_game_document
-from app.models import GameState
+from app.models import EmployerRule, GameState
 from app.mongo_games import MongoGameStore
 
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
@@ -176,6 +176,7 @@ def run_single_negotiation(
     fixed_endowment: bool,
     rng: random.Random,
     recorded_seed: Optional[int] = None,
+    employer_rule: EmployerRule = "nash",
 ) -> tuple[dict[str, Any], str, str, int]:
     """Play one game via Groq and build the MongoDB document (does not insert).
 
@@ -186,7 +187,7 @@ def run_single_negotiation(
         (5.0, 5.0) if fixed_endowment else sample_initial_endowment(rng)
     )
 
-    state = start_game(alpha, endowment=endowment)
+    state = start_game(alpha, endowment=endowment, employer_rule=employer_rule)
     session_id = str(uuid.uuid4())
     slug = slug_model_name(model)
     game_id = f"{slug}_{uuid.uuid4()}"
@@ -244,6 +245,12 @@ def main() -> None:
         action="store_true",
         help="Simulate only: do not write to MongoDB.",
     )
+    parser.add_argument(
+        "--employer-rule",
+        choices=["nash", "lens"],
+        default="nash",
+        help="Employer counteroffer rule: 'nash' (default) or 'lens' (endowment-lens optimal).",
+    )
     args = parser.parse_args()
 
     api_key = os.environ.get("GROQ_API_KEY")
@@ -261,6 +268,7 @@ def main() -> None:
             fixed_endowment=args.fixed_endowment,
             rng=rng,
             recorded_seed=args.seed,
+            employer_rule=args.employer_rule,
         )
     except (ValueError, RuntimeError) as exc:
         print(f"Hard fail: {exc}", file=sys.stderr)

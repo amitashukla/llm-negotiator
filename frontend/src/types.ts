@@ -1,5 +1,6 @@
 export type Phase = "setup" | "play" | "done";
 export type OfferType = "candidate" | "employer";
+export type EmployerRule = "nash" | "lens";
 
 export interface Offer {
   xH: number;
@@ -54,6 +55,7 @@ export interface GameState {
   /** True preferences (alpha): ICs through initial endowment; shown when phase is done */
   endowmentIndifferenceCurves: IndifferenceCurves | null;
   history: HistoryEntry[];
+  employerRule: EmployerRule;
 }
 
 export interface SessionResponse {

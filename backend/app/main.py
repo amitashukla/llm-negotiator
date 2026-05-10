@@ -79,7 +79,7 @@ def start_session(session_id: str, payload: StartGameRequest) -> SessionResponse
     if state is None:
         raise HTTPException(status_code=404, detail="Session not found")
     try:
-        new_state = start_game(payload.alpha)
+        new_state = start_game(payload.alpha, employer_rule=payload.employer_rule)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     store.set(session_id, new_state)

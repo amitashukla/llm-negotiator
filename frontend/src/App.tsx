@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { API_BASE, createSession, getSession, sendAction, startGame } from "./api";
-import type { GameState, Offer } from "./types";
+import type { EmployerRule, GameState, Offer } from "./types";
 
 const W = 10;
 const H = 10;
-const EMPLOYER_ALPHA = 0.6;
+const EMPLOYER_BETA = 0.8;
 const ROUNDS = 5;
 const CANVAS = 420;
 const PAD = 48;
@@ -19,7 +19,10 @@ const COLORS = {
   agree: "#1D9E75",
   /** True ICs through initial endowment (phase done) */
   icEndowment: "#16a34a",
-  employerNashGuess: "#16a34a"
+  employerNashGuess: "#16a34a",
+  /** Estimated lens: amber; true lens: cyan */
+  estimatedLens: "#f59e0b",
+  trueLens: "#06b6d4",
 };
 
 function toCanvas(xH: number, yH: number) {
@@ -41,7 +44,7 @@ function offerUtilities(xH: number, yH: number, candidateAlpha: number) {
   const candidateU = cobbDouglasUtility(xH, yH, candidateAlpha);
   const employerX = W - xH;
   const employerY = H - yH;
-  const employerU = cobbDouglasUtility(employerX, employerY, EMPLOYER_ALPHA);
+  const employerU = cobbDouglasUtility(employerX, employerY, EMPLOYER_BETA);
   return { candidateU, employerU, employerX, employerY };
 }
 
@@ -56,9 +59,9 @@ function candidateIcY(xC: number, alpha: number, utility: number): number | null
 function employerIcY(xC: number, utility: number): number | null {
   if (xC <= 0 || xC >= W) return null;
   const employerX = W - xC;
-  const base = employerX ** EMPLOYER_ALPHA;
+  const base = employerX ** EMPLOYER_BETA;
   if (base === 0) return null;
-  const employerY = (utility / base) ** (1 / (1 - EMPLOYER_ALPHA));
+  const employerY = (utility / base) ** (1 / (1 - EMPLOYER_BETA));
   return H - employerY;
 }
 
@@ -69,7 +72,7 @@ function buildAllocIcPath(
   side: "candidate" | "employer"
 ): string | null {
   const candidateU = cobbDouglasUtility(allocXH, allocYH, alpha);
-  const employerU = cobbDouglasUtility(W - allocXH, H - allocYH, EMPLOYER_ALPHA);
+  const employerU = cobbDouglasUtility(W - allocXH, H - allocYH, EMPLOYER_BETA);
   const samples = 240;
   const pts: { xH: number; yH: number }[] = [];
   for (let i = 1; i < samples; i++) {
@@ -91,10 +94,47 @@ function buildAllocIcPath(
     .join(" ");
 }
 
+/**
+ * Build a closed SVG path for the lens region: all (x,y) where both the candidate
+ * (using candidateAlpha) and the employer gain relative to the endowment.
+ * Upper boundary = employer IC through endowment; lower = candidate IC through endowment.
+ */
+function buildLensPath(endowX: number, endowY: number, candidateAlpha: number): string | null {
+  const uCEndow = cobbDouglasUtility(endowX, endowY, candidateAlpha);
+  const uEEndow = cobbDouglasUtility(W - endowX, H - endowY, EMPLOYER_BETA);
+  const samples = 300;
+  const upperPts: { xH: number; yH: number }[] = [];
+  const lowerPts: { xH: number; yH: number }[] = [];
+
+  for (let i = 1; i < samples; i++) {
+    const xC = (i / samples) * (W - 0.02) + 0.01;
+    const yC = candidateIcY(xC, candidateAlpha, uCEndow);
+    const yE = employerIcY(xC, uEEndow);
+    if (yC === null || yE === null) continue;
+    if (yC < 0 || yC > H || yE < 0 || yE > H) continue;
+    if (yE > yC) {
+      upperPts.push({ xH: xC, yH: yE });
+      lowerPts.push({ xH: xC, yH: yC });
+    }
+  }
+
+  if (upperPts.length < 2) return null;
+  const allPts = [...upperPts, ...[...lowerPts].reverse()];
+  return (
+    allPts
+      .map((p, i) => {
+        const c = toCanvas(p.xH, p.yH);
+        return `${i === 0 ? "M" : "L"} ${c.cx.toFixed(2)} ${c.cy.toFixed(2)}`;
+      })
+      .join(" ") + " Z"
+  );
+}
+
 export default function App() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [state, setState] = useState<GameState | null>(null);
   const [alphaInput, setAlphaInput] = useState("0.5");
+  const [employerRule, setEmployerRule] = useState<EmployerRule>("nash");
   const [hover, setHover] = useState<{ xH: number; yH: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -202,6 +242,20 @@ export default function App() {
     return buildAllocIcPath(ex, ey, state.alpha, "employer");
   }, [state?.phase, state?.alpha, state?.endowXH, state?.endowYH, state?.endowmentIndifferenceCurves]);
 
+  // Estimated lens (alpha_hat): shown during play and done
+  const estimatedLensPath = useMemo(() => {
+    if (!state || state.phase === "setup") return null;
+    if (state.endowXH == null || state.endowYH == null) return null;
+    return buildLensPath(state.endowXH, state.endowYH, state.alphaHat);
+  }, [state?.alphaHat, state?.endowXH, state?.endowYH, state?.phase]);
+
+  // True lens (true alpha): shown only in done phase
+  const trueLensPath = useMemo(() => {
+    if (!state || state.phase !== "done" || state.alpha == null) return null;
+    if (state.endowXH == null || state.endowYH == null) return null;
+    return buildLensPath(state.endowXH, state.endowYH, state.alpha);
+  }, [state?.alpha, state?.endowXH, state?.endowYH, state?.phase]);
+
   const endowX = state?.endowXH ?? 5;
   const endowY = state?.endowYH ?? 5;
   const endowC = toCanvas(endowX, endowY);
@@ -226,7 +280,7 @@ export default function App() {
     try {
       setError("");
       const parsed = Number(alphaInput);
-      const res = await startGame(sessionId, parsed);
+      const res = await startGame(sessionId, parsed, employerRule);
       setState(res.state);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Start failed");
@@ -291,6 +345,29 @@ export default function App() {
                 style={{ width: 80 }}
               />
             </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
+              <label style={{ fontSize: 13, color: "#6b7280" }}>Employer rule:</label>
+              <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 4 }}>
+                <input
+                  type="radio"
+                  name="employerRule"
+                  value="nash"
+                  checked={employerRule === "nash"}
+                  onChange={() => setEmployerRule("nash")}
+                />
+                Nash
+              </label>
+              <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 4 }}>
+                <input
+                  type="radio"
+                  name="employerRule"
+                  value="lens"
+                  checked={employerRule === "lens"}
+                  onChange={() => setEmployerRule("lens")}
+                />
+                Lens
+              </label>
+            </div>
           </div>
           <button onClick={handleStart} style={{ alignSelf: "flex-start" }}>
             Start game
@@ -329,6 +406,16 @@ export default function App() {
                   </g>
                 );
               })}
+
+              {/* True lens (done phase only, cyan) */}
+              {state.phase === "done" && trueLensPath && (
+                <path d={trueLensPath} fill={COLORS.trueLens} fillOpacity={0.15} stroke={COLORS.trueLens} strokeOpacity={0.5} strokeWidth={1} />
+              )}
+
+              {/* Estimated lens (play + done, amber) */}
+              {estimatedLensPath && (
+                <path d={estimatedLensPath} fill={COLORS.estimatedLens} fillOpacity={0.15} stroke={COLORS.estimatedLens} strokeOpacity={0.5} strokeWidth={1} />
+              )}
 
               <circle cx={endowC.cx} cy={endowC.cy} r={5} fill={COLORS.endow} opacity={0.8} />
 
@@ -467,6 +554,9 @@ export default function App() {
             <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", padding: "1rem 1.25rem" }}>
               <p style={{ margin: "0 0 8px", fontSize: 13, fontWeight: 600 }}>Employer belief about your alpha</p>
               <p style={{ margin: "0 0 4px", fontSize: 12, color: "#6b7280" }}>
+                Rule: <strong>{state.employerRule === "lens" ? "Lens (endowment-optimal)" : "Nash bargaining"}</strong>
+              </p>
+              <p style={{ margin: "0 0 4px", fontSize: 12, color: "#6b7280" }}>
                 Posterior: Beta({state.posterior.a.toFixed(1)}, {state.posterior.b.toFixed(1)})
               </p>
               <p style={{ margin: "0 0 4px", fontSize: 12, color: "#6b7280" }}>
@@ -474,8 +564,13 @@ export default function App() {
                 <strong>{state.alpha ?? "-"}</strong>
               </p>
               {state.nashEst && (
-                <p style={{ margin: 0, fontSize: 12, color: "#6b7280" }}>
+                <p style={{ margin: "0 0 4px", fontSize: 12, color: "#6b7280" }}>
                   Nash estimate: you ({state.nashEst.xH.toFixed(2)}, {state.nashEst.yH.toFixed(2)})
+                </p>
+              )}
+              {state.phase === "play" && (
+                <p style={{ margin: 0, fontSize: 12, color: "#6b7280" }}>
+                  <span style={{ color: COLORS.estimatedLens, fontWeight: 600 }}>Amber region</span>: employer&apos;s estimated lens (α̂)
                 </p>
               )}
             </div>
@@ -536,6 +631,12 @@ export default function App() {
                     )}
                     <p style={{ margin: "0 0 4px" }}>
                       Green curves: true indifference curves for both parties through the initial endowment point.
+                    </p>
+                    <p style={{ margin: "0 0 4px" }}>
+                      <span style={{ color: COLORS.trueLens, fontWeight: 600 }}>Cyan fill</span>: true lens — allocations where both gain vs. endowment (true α).
+                    </p>
+                    <p style={{ margin: "0 0 4px" }}>
+                      <span style={{ color: COLORS.estimatedLens, fontWeight: 600 }}>Amber fill</span>: estimated lens — employer&apos;s belief about the lens (α̂ = {state.alphaHat.toFixed(3)}).
                     </p>
                     {state.agreed ? (
                       <p style={{ margin: 0 }}>

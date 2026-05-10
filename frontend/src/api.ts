@@ -1,4 +1,4 @@
-import type { SessionResponse } from "./types";
+import type { EmployerRule, SessionResponse } from "./types";
 
 export const API_BASE =
   (import.meta as ImportMeta & { env?: { VITE_API_BASE_URL?: string } }).env?.VITE_API_BASE_URL ??
@@ -40,10 +40,10 @@ export function getSession(sessionId: string) {
   return request<SessionResponse>(`${API_BASE}/session/${sessionId}`);
 }
 
-export function startGame(sessionId: string, alpha: number) {
+export function startGame(sessionId: string, alpha: number, employerRule: EmployerRule = "nash") {
   return request<SessionResponse>(`${API_BASE}/session/${sessionId}/start`, {
     method: "POST",
-    body: JSON.stringify({ alpha })
+    body: JSON.stringify({ alpha, employer_rule: employerRule })
   });
 }
 

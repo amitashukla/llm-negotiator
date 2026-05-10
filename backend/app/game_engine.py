@@ -4,7 +4,7 @@ import math
 import random
 from typing import Optional
 
-from .models import CurvePoint, GameState, HistoryEntry, IndifferenceCurves, NashEstimate, Offer, Posterior
+from .models import CurvePoint, EmployerRule, GameState, HistoryEntry, IndifferenceCurves, NashEstimate, Offer, Posterior
 
 W = 10.0
 H = 10.0
@@ -166,6 +166,40 @@ def employer_counteroffer(round_num: int, offers: list[Offer], prior: Posterior)
     return employer_offer, post, alpha_hat, nb
 
 
+def employer_counteroffer_lens(
+    round_num: int,
+    offers: list[Offer],
+    prior: Posterior,
+    endow_x: float,
+    endow_y: float,
+) -> tuple[Offer, Posterior, float, NashEstimate]:
+    """Lens-rule counteroffer: employer finds best point in estimated lens.
+
+    Interpolates u_target from Nash (round 1) toward the lens boundary (later rounds)
+    using DELTA^(round_num-1) decay.  Falls back to Nash estimate if the result
+    violates the employer's own endowment constraint or no IC point is found.
+    """
+    post = update_posterior(prior, offers)
+    alpha_hat = posterior_mean(post)
+    nb = nash_point(alpha_hat)
+
+    u_lens = candidate_util(endow_x, endow_y, alpha_hat)   # lens boundary (candidate reservation)
+    u_nash = candidate_util(nb.xH, nb.yH, alpha_hat)       # Nash utility under alpha_hat
+
+    t = DELTA ** (round_num - 1)
+    # Guard: if Nash point is below lens boundary under alpha_hat, stay at the boundary.
+    u_target = u_lens + max(0.0, u_nash - u_lens) * t
+
+    result = best_employer_on_ic(alpha_hat, u_target)
+
+    u_e_endow = employer_util(endow_x, endow_y)
+    if result is None or employer_util(result[0], result[1]) < u_e_endow:
+        employer_offer = Offer(xH=nb.xH, yH=nb.yH, type="employer", round=round_num)
+    else:
+        employer_offer = Offer(xH=result[0], yH=result[1], type="employer", round=round_num)
+    return employer_offer, post, alpha_hat, nb
+
+
 def _finalize_done_state(state: GameState) -> None:
     """Recompute employer belief from all candidate offers; Nash guess; true ICs through endowment."""
     post = update_posterior(Posterior(a=2.0, b=2.0), state.offers)
@@ -191,7 +225,11 @@ def last_employer_offer(state: GameState) -> Optional[Offer]:
     return _last_offer(state.offers, "employer")
 
 
-def start_game(alpha: float, endowment: Optional[tuple[float, float]] = None) -> GameState:
+def start_game(
+    alpha: float,
+    endowment: Optional[tuple[float, float]] = None,
+    employer_rule: EmployerRule = "nash",
+) -> GameState:
     if alpha <= 0 or alpha >= 1:
         raise ValueError("Alpha must be between 0 and 1 (exclusive).")
     if endowment is None:
@@ -215,6 +253,7 @@ def start_game(alpha: float, endowment: Optional[tuple[float, float]] = None) ->
         indifferenceCurves=None,
         endowmentIndifferenceCurves=None,
         history=[],
+        employerRule=employer_rule,
     )
 
 
@@ -286,7 +325,16 @@ def apply_confirm(state: GameState) -> GameState:
         _finalize_done_state(state)
         return state
 
-    employer_offer, new_post, a_hat, nb = employer_counteroffer(state.round, new_offers, Posterior(a=2.0, b=2.0))
+    if (
+        state.employerRule == "lens"
+        and state.endowXH is not None
+        and state.endowYH is not None
+    ):
+        employer_offer, new_post, a_hat, nb = employer_counteroffer_lens(
+            state.round, new_offers, Posterior(a=2.0, b=2.0), state.endowXH, state.endowYH
+        )
+    else:
+        employer_offer, new_post, a_hat, nb = employer_counteroffer(state.round, new_offers, Posterior(a=2.0, b=2.0))
     all_offers = [*new_offers, employer_offer]
 
     state.posterior = new_post
