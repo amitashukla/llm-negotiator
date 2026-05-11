@@ -100,6 +100,7 @@ export default function GameScreen({
             trueNash={gameState.trueNash}
             employerNash={gameState.nashEst}
             isPlayerTurn={isPlayerTurn}
+            employerRule={gameState.employerRule}
             onChartClick={onChartClick}
           />
         </div>
@@ -174,11 +175,33 @@ export default function GameScreen({
             </div>
           )}
 
+          {/* Lens acceptance rule hint */}
+          {gameState.employerRule === "lens" && (
+            <div
+              style={{
+                background: "#f0fdf4",
+                border: "1px solid #bbf7d0",
+                borderLeft: "3px solid #1D9E75",
+                borderRadius: 10,
+                padding: "0.75rem 1rem",
+              }}
+            >
+              <p style={{ margin: "0 0 3px", fontSize: 12, fontWeight: 600, color: "#15803d" }}>
+                Employer auto-accepts
+              </p>
+              <p style={{ margin: 0, fontSize: 11, color: "#166534" }}>
+                {mode === "omniscient"
+                  ? "Employer will accept any offer within the dashed teal region (their believed feasibility space)."
+                  : "Employer will accept your offer if it falls within their believed feasibility space."}
+              </p>
+            </div>
+          )}
+
           {/* Offer history */}
           <OfferHistory mode={mode} history={history} alpha={gameState.alpha} />
 
           {/* Legend */}
-          <Legend mode={mode} />
+          <Legend mode={mode} employerRule={gameState.employerRule} />
         </div>
       </div>
 

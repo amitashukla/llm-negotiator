@@ -1,5 +1,5 @@
 import { useMemo, useRef } from "react";
-import type { Offer } from "../types";
+import type { EmployerRule, Offer } from "../types";
 import {
   toCanvas,
   fromCanvas,
@@ -40,6 +40,7 @@ interface EdgeworthChartProps {
   trueNash: { xH: number; yH: number } | null;
   employerNash: { xH: number; yH: number } | null;
   isPlayerTurn: boolean;
+  employerRule?: EmployerRule;
   onChartClick: (x: number, y: number) => void;
 }
 
@@ -54,6 +55,7 @@ export default function EdgeworthChart({
   trueNash,
   employerNash,
   isPlayerTurn,
+  employerRule,
   onChartClick,
 }: EdgeworthChartProps) {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -62,6 +64,7 @@ export default function EdgeworthChart({
   const showBelievedCurve = mode === "omniscient";
   const showNash = mode === "omniscient" || mode === "reveal";
   const showLens = mode === "reveal";
+  const showBeliefLens = mode === "omniscient" && employerRule === "lens";
 
   const candidateTrueIcPath = useMemo(
     () => (showCurves && alpha != null ? buildIcPath(endowment.xH, endowment.yH, alpha, "candidate") : null),
@@ -81,6 +84,11 @@ export default function EdgeworthChart({
   const lensPath = useMemo(
     () => (showLens && alpha != null ? buildLensPath(endowment.xH, endowment.yH, alpha) : null),
     [showLens, alpha, endowment.xH, endowment.yH]
+  );
+
+  const beliefLensPath = useMemo(
+    () => (showBeliefLens ? buildLensPath(endowment.xH, endowment.yH, alphaHat) : null),
+    [showBeliefLens, alphaHat, endowment.xH, endowment.yH]
   );
 
   const agreedCandidateIcPath = useMemo(
@@ -166,7 +174,20 @@ export default function EdgeworthChart({
         Employer ⊤
       </text>
 
-      {/* Lens region (reveal only) */}
+      {/* Employer's believed feasibility space (omniscient + lens rule, dashed) */}
+      {showBeliefLens && beliefLensPath && (
+        <path
+          d={beliefLensPath}
+          fill={C.lens}
+          fillOpacity={0.1}
+          stroke={C.lens}
+          strokeOpacity={0.6}
+          strokeWidth={1.25}
+          strokeDasharray="5,3"
+        />
+      )}
+
+      {/* True lens region (reveal only) */}
       {showLens && lensPath && (
         <path
           d={lensPath}

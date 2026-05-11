@@ -103,6 +103,11 @@ export default function RevealScreen({ mode, gameState, onPlayAgain }: RevealScr
             {dealReached && agreed && agreedValsCandidate && (
               <>
                 <p style={{ margin: "0 0 3px", fontSize: 12, color: "#6b7280" }}>
+                  {agreed.type === "candidate"
+                    ? "Employer accepted your offer"
+                    : "You accepted the employer's offer"}
+                </p>
+                <p style={{ margin: "0 0 3px", fontSize: 12, color: "#6b7280" }}>
                   Final allocation: ({agreed.xH.toFixed(2)}, {agreed.yH.toFixed(2)})
                 </p>
                 <p style={{ margin: "0 0 3px", fontSize: 12, color: "#6b7280" }}>

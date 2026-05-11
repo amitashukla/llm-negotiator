@@ -1,4 +1,4 @@
-import type { GameMode } from "../types";
+import type { EmployerRule, GameMode } from "../types";
 
 interface LegendRowProps {
   sample: React.ReactNode;
@@ -41,10 +41,15 @@ function CrossSample({ color }: { color: string }) {
   );
 }
 
-function LensRegionSample({ color }: { color: string }) {
+function LensRegionSample({ color, dashed }: { color: string; dashed?: boolean }) {
   return (
     <svg width="22" height="12" viewBox="0 0 22 12">
-      <ellipse cx="11" cy="6" rx="10" ry="5" fill={color} fillOpacity={0.25} stroke={color} strokeWidth="1" strokeOpacity={0.7} />
+      <ellipse
+        cx="11" cy="6" rx="10" ry="5"
+        fill={color} fillOpacity={dashed ? 0.15 : 0.25}
+        stroke={color} strokeWidth="1" strokeOpacity={dashed ? 0.6 : 0.7}
+        strokeDasharray={dashed ? "3,2" : undefined}
+      />
     </svg>
   );
 }
@@ -53,9 +58,10 @@ type LegendMode = GameMode | "reveal";
 
 interface LegendProps {
   mode: LegendMode;
+  employerRule?: EmployerRule;
 }
 
-export default function Legend({ mode }: LegendProps) {
+export default function Legend({ mode, employerRule }: LegendProps) {
   return (
     <div
       style={{
@@ -118,6 +124,13 @@ export default function Legend({ mode }: LegendProps) {
         <Row
           sample={<LineSample stroke="#7F77DD" dasharray="5,3" />}
           label="Employer believed indiff. curve"
+        />
+      )}
+
+      {mode === "omniscient" && employerRule === "lens" && (
+        <Row
+          sample={<LensRegionSample color="#9FE1CB" dashed />}
+          label="Employer's believed feasibility space"
         />
       )}
 
