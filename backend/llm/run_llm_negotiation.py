@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Run one negotiation game via Groq (OpenAI-compatible API) and archive to MongoDB.
 
-Usage (from repo root or backend):
+Usage (from repo root or backend/llm):
 
-  cd backend && python run_llm_negotiation.py --model=llama-3.3-70b-versatile
+  cd backend/llm && python run_llm_negotiation.py --model=llama-3.3-70b-versatile
 
 Requires GROQ_API_KEY in .env at repository root. Optional MONGODB_URI / MONGODB_DB.
 
@@ -35,10 +35,10 @@ from typing import Any, Optional
 
 from dotenv import load_dotenv
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+_BACKEND_ROOT = Path(__file__).resolve().parent.parent
+_REPO_ROOT = _BACKEND_ROOT.parent
 load_dotenv(_REPO_ROOT / ".env")
 
-_BACKEND_ROOT = Path(__file__).resolve().parent
 if str(_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(_BACKEND_ROOT))
 
@@ -55,7 +55,7 @@ from app.game_engine import (
     start_game,
 )
 from app.game_record import build_completed_game_document
-from app.models import EmployerRule, GameState
+from app.models import EmployerRule, GameState, UiMode
 from app.mongo_games import MongoGameStore
 
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
@@ -191,10 +191,14 @@ def run_single_negotiation(
     rng: random.Random,
     recorded_seed: Optional[int] = None,
     employer_rule: EmployerRule = "nash",
+    ui_mode: UiMode = "blind",
 ) -> tuple[dict[str, Any], str, str, int]:
     """Play one game via Groq and build the MongoDB document (does not insert).
 
     Use a fresh ``random.Random()`` per call in batch mode for independent α and endowment draws.
+
+    ``ui_mode`` is recorded on the game document under ``experiment.ui_mode``. The default
+    ``"blind"`` matches the current LLM system prompt (which hides employer-side info).
     """
     alpha = sample_alpha(rng)
     endowment: tuple[float, float] = (
@@ -202,6 +206,7 @@ def run_single_negotiation(
     )
 
     state = start_game(alpha, endowment=endowment, employer_rule=employer_rule)
+    state.uiMode = ui_mode
     session_id = str(uuid.uuid4())
     slug = slug_model_name(model)
     game_id = f"{slug}_{uuid.uuid4()}"
@@ -265,6 +270,12 @@ def main() -> None:
         default="nash",
         help="Employer counteroffer rule: 'nash' (default) or 'lens' (endowment-lens optimal).",
     )
+    parser.add_argument(
+        "--ui-mode",
+        choices=["blind", "omniscient"],
+        default="blind",
+        help="Information mode recorded for the game (default: 'blind' — matches the current LLM prompt).",
+    )
     args = parser.parse_args()
 
     api_key = os.environ.get("GROQ_API_KEY")
@@ -283,6 +294,7 @@ def main() -> None:
             rng=rng,
             recorded_seed=args.seed,
             employer_rule=args.employer_rule,
+            ui_mode=args.ui_mode,
         )
     except (ValueError, RuntimeError) as exc:
         print(f"Hard fail: {exc}", file=sys.stderr)

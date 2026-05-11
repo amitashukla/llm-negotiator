@@ -315,6 +315,36 @@ def apply_confirm(state: GameState) -> GameState:
             _finalize_done_state(state)
             return state
 
+    if (
+        state.employerRule == "lens"
+        and state.endowXH is not None
+        and state.endowYH is not None
+    ):
+        post = update_posterior(Posterior(a=2.0, b=2.0), new_offers)
+        alpha_hat = posterior_mean(post)
+        if (
+            candidate_util(candidate_offer.xH, candidate_offer.yH, alpha_hat)
+            >= candidate_util(state.endowXH, state.endowYH, alpha_hat)
+            and employer_util(candidate_offer.xH, candidate_offer.yH)
+            >= employer_util(state.endowXH, state.endowYH)
+        ):
+            state.agreed = candidate_offer
+            state.phase = "done"
+            state.offers = new_offers
+            state.pending = None
+            state.trueNash = nash_point(state.alpha) if state.alpha is not None else None
+            state.indifferenceCurves = (
+                build_indifference_curves(candidate_offer.xH, candidate_offer.yH, state.alpha)
+                if state.alpha is not None
+                else None
+            )
+            state.msg = (
+                f"Employer accepts! Deal at Candidate ({candidate_offer.xH:.2f}, {candidate_offer.yH:.2f}), "
+                f"Employer ({W - candidate_offer.xH:.2f}, {H - candidate_offer.yH:.2f})."
+            )
+            _finalize_done_state(state)
+            return state
+
     if state.round >= ROUNDS:
         state.offers = new_offers
         state.pending = None

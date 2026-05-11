@@ -5,9 +5,9 @@ Each run uses a fresh ``random.Random()`` so alpha and endowment are independent
 
 Examples::
 
-  cd backend && python batch_run_llm_negotiation.py --runs 20
-  cd backend && python batch_run_llm_negotiation.py --model=llama-3.3-70b-versatile --runs 10
-  cd backend && python batch_run_llm_negotiation.py --model=openai/gpt-oss-20b --model=openai/gpt-oss-120b --runs 5
+  cd backend/llm && python batch_run_llm_negotiation.py --runs 20
+  cd backend/llm && python batch_run_llm_negotiation.py --model=llama-3.3-70b-versatile --runs 10
+  cd backend/llm && python batch_run_llm_negotiation.py --model=openai/gpt-oss-20b --model=openai/gpt-oss-120b --runs 5
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from typing import Optional
 
 from dotenv import load_dotenv
 
-_BACKEND_ROOT = Path(__file__).resolve().parent
+_BACKEND_ROOT = Path(__file__).resolve().parent.parent
 _REPO_ROOT = _BACKEND_ROOT.parent
 if str(_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(_BACKEND_ROOT))
@@ -67,6 +67,12 @@ def main() -> None:
         default="nash",
         help="Employer counteroffer rule: 'nash' (default) or 'lens' (endowment-lens optimal).",
     )
+    parser.add_argument(
+        "--ui-mode",
+        choices=["blind", "omniscient"],
+        default="blind",
+        help="Information mode recorded for each game (default: 'blind' — matches the current LLM prompt).",
+    )
     args = parser.parse_args()
 
     models = args.models if args.models else ["llama-3.3-70b-versatile"]
@@ -100,6 +106,7 @@ def main() -> None:
                         rng=rng,
                         recorded_seed=None,
                         employer_rule=args.employer_rule,
+                        ui_mode=args.ui_mode,
                     )
                 except (ValueError, RuntimeError) as exc:
                     failed += 1
