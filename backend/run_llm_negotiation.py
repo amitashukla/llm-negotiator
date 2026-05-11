@@ -3,9 +3,23 @@
 
 Usage (from repo root or backend):
 
-  cd backend && python run_llm_negotiation.py --model llama-3.3-70b-versatile
+  cd backend && python run_llm_negotiation.py --model=llama-3.3-70b-versatile
 
-Requires GROQ_API_KEY in .env at repository root. Optional MONGODB_URI / MONGODB_DB."""
+Requires GROQ_API_KEY in .env at repository root. Optional MONGODB_URI / MONGODB_DB.
+
+Groq ``model`` slugs for ``--model=…`` (use equals form so values with ``/`` are one
+argument; availability changes — see https://console.groq.com/docs/models):
+
+  python run_llm_negotiation.py --model=llama-3.3-70b-versatile
+  python run_llm_negotiation.py --model=llama-3.1-8b-instant
+  python run_llm_negotiation.py --model=openai/gpt-oss-120b
+  python run_llm_negotiation.py --model=openai/gpt-oss-20b
+  python run_llm_negotiation.py --model=groq/compound
+  python run_llm_negotiation.py --model=groq/compound-mini
+  python run_llm_negotiation.py --model=meta-llama/llama-4-scout-17b-16e-instruct
+  python run_llm_negotiation.py --model=qwen/qwen3-32b
+  python run_llm_negotiation.py --model=openai/gpt-oss-safeguard-20b
+  python run_llm_negotiation.py --model=gemma2-9b-it"""
 
 from __future__ import annotations
 
@@ -231,7 +245,7 @@ def main() -> None:
     parser.add_argument(
         "--model",
         default="llama-3.3-70b-versatile",
-        help="Groq model id (e.g. llama-3.3-70b-versatile)",
+        help="Groq model id (e.g. --model=openai/gpt-oss-120b; use = so slugs with / parse as one arg)",
     )
     parser.add_argument("--temperature", type=float, default=0.7)
     parser.add_argument(

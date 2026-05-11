@@ -6,8 +6,8 @@ Each run uses a fresh ``random.Random()`` so alpha and endowment are independent
 Examples::
 
   cd backend && python batch_run_llm_negotiation.py --runs 20
-  cd backend && python batch_run_llm_negotiation.py --model llama-3.3-70b-versatile --runs 10
-  cd backend && python batch_run_llm_negotiation.py --model A --model B --runs 5
+  cd backend && python batch_run_llm_negotiation.py --model=llama-3.3-70b-versatile --runs 10
+  cd backend && python batch_run_llm_negotiation.py --model=openai/gpt-oss-20b --model=openai/gpt-oss-120b --runs 5
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ def main() -> None:
         action="append",
         dest="models",
         metavar="MODEL",
-        help="Groq model id (repeat for multiple models). Default: one run of llama-3.3-70b-versatile.",
+        help="Groq model id (repeat for multiple). Use --model=<id> so slugs with / stay one token. Default: llama-3.3-70b-versatile.",
     )
     parser.add_argument(
         "--runs",
