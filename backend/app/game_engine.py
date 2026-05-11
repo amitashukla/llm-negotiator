@@ -17,6 +17,10 @@ ACCEPT_RADIUS = 0.3
 ENDOW_P_MEAN = 0.5
 ENDOW_P_STDEV = 0.05
 
+PRIOR_A = 1.0       # Beta(1,1) — uniform prior over alpha
+PRIOR_B = 1.0
+OFFER_WEIGHT = 6.0  # pseudo-observations added per candidate offer
+
 
 def sample_initial_endowment(rng: Optional[random.Random] = None) -> tuple[float, float]:
     """Candidate receives p * (W, H) with p ~ N(mu, sigma), clipped to keep allocations interior."""
@@ -125,8 +129,8 @@ def update_posterior(prior: Posterior, offers: list[Offer]) -> Posterior:
         if offer.type != "candidate":
             continue
         sig = (offer.xH / W) / ((offer.xH / W) + (offer.yH / H))
-        a += 3 * sig
-        b += 3 * (1 - sig)
+        a += OFFER_WEIGHT * sig
+        b += OFFER_WEIGHT * (1 - sig)
     return Posterior(a=a, b=b)
 
 
@@ -202,7 +206,7 @@ def employer_counteroffer_lens(
 
 def _finalize_done_state(state: GameState) -> None:
     """Recompute employer belief from all candidate offers; Nash guess; true ICs through endowment."""
-    post = update_posterior(Posterior(a=2.0, b=2.0), state.offers)
+    post = update_posterior(Posterior(a=PRIOR_A, b=PRIOR_B), state.offers)
     state.posterior = post
     state.alphaHat = posterior_mean(post)
     if state.alpha is not None:
@@ -245,7 +249,7 @@ def start_game(
         offers=[],
         pending=None,
         msg="Round 1 of 5 - click the box to propose your allocation. Your origin is bottom-left.",
-        posterior=Posterior(a=2.0, b=2.0),
+        posterior=Posterior(a=PRIOR_A, b=PRIOR_B),
         alphaHat=0.5,
         agreed=None,
         nashEst=None,
@@ -320,7 +324,7 @@ def apply_confirm(state: GameState) -> GameState:
         and state.endowXH is not None
         and state.endowYH is not None
     ):
-        post = update_posterior(Posterior(a=2.0, b=2.0), new_offers)
+        post = update_posterior(Posterior(a=PRIOR_A, b=PRIOR_B), new_offers)
         alpha_hat = posterior_mean(post)
         if (
             candidate_util(candidate_offer.xH, candidate_offer.yH, alpha_hat)
@@ -361,10 +365,10 @@ def apply_confirm(state: GameState) -> GameState:
         and state.endowYH is not None
     ):
         employer_offer, new_post, a_hat, nb = employer_counteroffer_lens(
-            state.round, new_offers, Posterior(a=2.0, b=2.0), state.endowXH, state.endowYH
+            state.round, new_offers, Posterior(a=PRIOR_A, b=PRIOR_B), state.endowXH, state.endowYH
         )
     else:
-        employer_offer, new_post, a_hat, nb = employer_counteroffer(state.round, new_offers, Posterior(a=2.0, b=2.0))
+        employer_offer, new_post, a_hat, nb = employer_counteroffer(state.round, new_offers, Posterior(a=PRIOR_A, b=PRIOR_B))
     all_offers = [*new_offers, employer_offer]
 
     state.posterior = new_post
